@@ -79,7 +79,6 @@ export default function DrawingView({ floorData, results, onSleeveHover, onSleev
               strokeWidth={isSelected ? 60 : 30}
               style={{ cursor: "pointer" }}
               onMouseEnter={() => onSleeveHover(s)}
-              onMouseLeave={() => onSleeveHover(null)}
               onClick={() => onSleeveClick(s)}
             />
           );
