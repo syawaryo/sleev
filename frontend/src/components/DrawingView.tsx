@@ -9,26 +9,31 @@ interface Props {
   onSleeveClick: (sleeve: Sleeve | null) => void;
   selectedSleeveId: string | null;
   layers: { grid: boolean; wall: boolean; step: boolean; sleeve: boolean; lowerWall: boolean };
-  colorMode: "severity" | "fl";
+  colorMode: "severity" | "fl" | "discipline";
 }
 
-const SEVERITY_COLORS: Record<string, string> = {
-  NG: "#f87171",
-  WARNING: "#fbbf24",
-  OK: "#34d399",
+const SEVERITY_COLORS: Record<string, { stroke: string; fill: string }> = {
+  NG: { stroke: "#dc2626", fill: "#fef2f2" },
+  WARNING: { stroke: "#d97706", fill: "#fffbeb" },
+  OK: { stroke: "#16a34a", fill: "#dcfce7" },
 };
 
-// FL value -> color mapping
 const FL_COLORS: Record<string, string> = {
-  "FL-225": "#60a5fa",
-  "FL-175": "#818cf8",
-  "FL-750": "#f472b6",
-  "FL-765": "#e879f9",
-  "FL+40": "#fbbf24",
-  "FL+0": "#a3e635",
-  "FL-60": "#38bdf8",
+  "FL-225": "#3b82f6",
+  "FL-175": "#8b5cf6",
+  "FL-750": "#ec4899",
+  "FL-765": "#d946ef",
+  "FL+40": "#f59e0b",
+  "FL+0": "#84cc16",
+  "FL-60": "#06b6d4",
 };
-const FL_DEFAULT_COLOR = "#9ca3af";
+
+const DISC_COLORS: Record<string, string> = {
+  "衛生": "#3b82f6",
+  "空調": "#f59e0b",
+  "電気": "#ef4444",
+  "建築": "#6b7280",
+};
 
 export default function DrawingView({
   floorData, lowerFloorData, results, onSleeveHover, onSleeveClick,
@@ -47,9 +52,14 @@ export default function DrawingView({
     return map;
   }, [results]);
 
-  const getSleeveColor = (s: Sleeve): string => {
+  const getSleeveColors = (s: Sleeve): { stroke: string; fill: string } => {
     if (colorMode === "fl") {
-      return FL_COLORS[s.fl_text || ""] || FL_DEFAULT_COLOR;
+      const c = FL_COLORS[s.fl_text || ""] || "#9ca3af";
+      return { stroke: c, fill: c + "20" };
+    }
+    if (colorMode === "discipline") {
+      const c = DISC_COLORS[s.discipline] || "#9ca3af";
+      return { stroke: c, fill: c + "20" };
     }
     return SEVERITY_COLORS[severityMap.get(s.id) || "OK"];
   };
@@ -57,80 +67,62 @@ export default function DrawingView({
   const viewBox = "-5000 -40000 90000 45000";
 
   return (
-    <svg
-      viewBox={viewBox}
-      style={{ width: "100%", height: "100%", background: "#0f172a" }}
-      xmlns="http://www.w3.org/2000/svg"
-    >
+    <svg viewBox={viewBox} style={{ width: "100%", height: "100%", background: "#fdfdfe" }} xmlns="http://www.w3.org/2000/svg">
       <g transform="scale(1,-1)">
         {/* Grid lines */}
         {layers.grid && floorData.grid_lines.map((g, i) =>
           g.direction === "H" ? (
             <line key={`gh${i}`} x1={-5000} y1={g.position} x2={85000} y2={g.position}
-              stroke="#1e3a5f" strokeWidth={15} strokeDasharray="300,150" />
+              stroke="#e5e7eb" strokeWidth={12} strokeDasharray="200,100" />
           ) : (
             <line key={`gv${i}`} x1={g.position} y1={-5000} x2={g.position} y2={40000}
-              stroke="#1e3a5f" strokeWidth={15} strokeDasharray="300,150" />
+              stroke="#e5e7eb" strokeWidth={12} strokeDasharray="200,100" />
           )
         )}
 
-        {/* Lower floor walls (for #6 check) */}
+        {/* Lower floor walls */}
         {layers.lowerWall && lowerFloorData?.wall_lines.map((w, i) => (
           <line key={`lw${i}`} x1={w.start[0]} y1={w.start[1]} x2={w.end[0]} y2={w.end[1]}
-            stroke="#7c3aed" strokeWidth={40} opacity={0.3} />
+            stroke="#c4b5fd" strokeWidth={35} opacity={0.25} />
         ))}
 
-        {/* Wall lines */}
+        {/* Walls */}
         {layers.wall && floorData.wall_lines.map((w, i) => (
           <line key={`w${i}`} x1={w.start[0]} y1={w.start[1]} x2={w.end[0]} y2={w.end[1]}
-            stroke="#475569" strokeWidth={25} />
+            stroke="#cbd5e1" strokeWidth={20} />
         ))}
 
         {/* Step lines */}
         {layers.step && floorData.step_lines.map((s, i) => (
           <line key={`s${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
-            stroke="#92400e" strokeWidth={18} opacity={0.6} />
+            stroke="#f59e0b" strokeWidth={15} opacity={0.35} />
         ))}
 
         {/* Sleeves */}
         {layers.sleeve && floorData.sleeves.map((s) => {
-          const color = getSleeveColor(s);
+          const colors = getSleeveColors(s);
           const isSelected = s.id === selectedSleeveId;
           const r = Math.max(s.diameter / 2, 200);
           return (
             <g key={s.id} style={{ cursor: "pointer" }}
               onMouseEnter={() => onSleeveHover(s)}
               onClick={() => onSleeveClick(s)}>
-              {/* Hit area (larger invisible circle for easier hover) */}
-              <circle cx={s.center[0]} cy={s.center[1]} r={r * 1.5}
-                fill="transparent" stroke="none" />
-              {/* Visible circle */}
+              {/* Hit area */}
+              <circle cx={s.center[0]} cy={s.center[1]} r={r * 1.8} fill="transparent" stroke="none" />
+              {/* Selection ring */}
+              {isSelected && (
+                <circle cx={s.center[0]} cy={s.center[1]} r={r + 80}
+                  fill="none" stroke={colors.stroke} strokeWidth={15} strokeDasharray="60,30" opacity={0.5} />
+              )}
+              {/* Main circle */}
               <circle cx={s.center[0]} cy={s.center[1]} r={r}
-                fill={isSelected ? color + "30" : color + "15"}
-                stroke={color}
-                strokeWidth={isSelected ? 50 : 25} />
+                fill={colors.fill} stroke={colors.stroke} strokeWidth={isSelected ? 35 : 20} />
               {/* Center dot */}
-              <circle cx={s.center[0]} cy={s.center[1]} r={40}
-                fill={color} />
+              <circle cx={s.center[0]} cy={s.center[1]} r={35} fill={colors.stroke} />
             </g>
           );
         })}
       </g>
-
-      {/* FL legend when in fl mode */}
-      {colorMode === "fl" && (
-        <g transform="translate(500, 500)">
-          <rect x={0} y={0} width={2800} height={Object.keys(FL_COLORS).length * 350 + 400}
-            fill="#1e293b" rx={100} opacity={0.9} />
-          <text x={200} y={300} fill="#e5e7eb" fontSize={250} fontWeight="bold">FL高さ</text>
-          {Object.entries(FL_COLORS).map(([fl, color], i) => (
-            <g key={fl} transform={`translate(200, ${450 + i * 350})`}>
-              <circle cx={150} cy={100} r={100} fill={color} opacity={0.8} />
-              <text x={400} y={150} fill="#e5e7eb" fontSize={200}>{fl}</text>
-            </g>
-          ))}
-        </g>
-      )}
     </svg>
   );
 }

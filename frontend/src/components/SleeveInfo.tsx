@@ -1,113 +1,62 @@
 import type { Sleeve, CheckResult } from "../types";
 
 interface Props {
-  sleeve: Sleeve | null;
+  sleeve: Sleeve;
   results: CheckResult[];
 }
 
 export default function SleeveInfo({ sleeve, results }: Props) {
-  if (!sleeve) {
-    return (
-      <div style={{ padding: 20, color: "#4b5563", fontSize: 13, textAlign: "center", marginTop: 40 }}>
-        スリーブにカーソルを合わせると<br />詳細情報が表示されます
-      </div>
-    );
-  }
-
   const sleeveResults = results.filter((r) => r.sleeve_id === sleeve.id);
   const ngResults = sleeveResults.filter((r) => r.severity === "NG");
   const warnResults = sleeveResults.filter((r) => r.severity === "WARNING");
-  const okResults = sleeveResults.filter((r) => r.severity === "OK");
 
-  const worstSeverity = ngResults.length > 0 ? "NG" : warnResults.length > 0 ? "WARNING" : "OK";
-  const borderColor = worstSeverity === "NG" ? "#f87171" : worstSeverity === "WARNING" ? "#fbbf24" : "#34d399";
+  const worst = ngResults.length > 0 ? "NG" : warnResults.length > 0 ? "WARNING" : "OK";
+  const badgeStyle: Record<string, { bg: string; color: string }> = {
+    NG: { bg: "#fef2f2", color: "#dc2626" },
+    WARNING: { bg: "#fffbeb", color: "#d97706" },
+    OK: { bg: "#f0fdf4", color: "#16a34a" },
+  };
+  const badge = badgeStyle[worst];
 
   return (
-    <div style={{ padding: 16, fontSize: 13 }}>
+    <div style={{
+      background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, width: 280,
+      boxShadow: "0 4px 16px rgba(0,0,0,0.06)", overflow: "hidden", fontSize: 12,
+    }}>
       {/* Header */}
-      <div style={{
-        padding: "10px 14px", borderRadius: 8, marginBottom: 12,
-        background: borderColor + "15", borderLeft: `3px solid ${borderColor}`,
-      }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: "#f9fafb" }}>
-          {sleeve.pn_number || sleeve.id}
-        </div>
-        <div style={{ color: "#9ca3af", fontSize: 11, marginTop: 2 }}>
-          {sleeve.discipline} | {sleeve.layer}
-        </div>
+      <div style={{ padding: "10px 14px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ background: badge.bg, color: badge.color, padding: "1px 6px", borderRadius: 3, fontSize: 9, fontWeight: 600 }}>{worst}</span>
+        <span style={{ fontWeight: 700, color: "#111827", fontSize: 14 }}>{sleeve.pn_number || sleeve.id}</span>
+        <span style={{ marginLeft: "auto", color: "#9ca3af", fontSize: 10 }}>{sleeve.discipline}</span>
       </div>
 
       {/* Properties */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px", marginBottom: 16 }}>
-        <div>
-          <div style={{ color: "#6b7280", fontSize: 10, textTransform: "uppercase" }}>径</div>
-          <div style={{ color: "#e5e7eb", fontWeight: 600 }}>{sleeve.diameter}mm</div>
-        </div>
-        <div>
-          <div style={{ color: "#6b7280", fontSize: 10, textTransform: "uppercase" }}>FL</div>
-          <div style={{ color: "#e5e7eb", fontWeight: 600 }}>{sleeve.fl_text || "-"}</div>
-        </div>
-        <div>
-          <div style={{ color: "#6b7280", fontSize: 10, textTransform: "uppercase" }}>種別</div>
-          <div style={{ color: "#e5e7eb" }}>{sleeve.label_text || "-"}</div>
-        </div>
-        <div>
-          <div style={{ color: "#6b7280", fontSize: 10, textTransform: "uppercase" }}>位置</div>
-          <div style={{ color: "#e5e7eb", fontSize: 11 }}>
-            ({sleeve.center[0].toFixed(0)}, {sleeve.center[1].toFixed(0)})
-          </div>
-        </div>
+      <div style={{ padding: "8px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        <div><div style={{ color: "#9ca3af", fontSize: 9 }}>径</div><div style={{ color: "#111827", fontWeight: 600 }}>{sleeve.diameter}mm</div></div>
+        <div><div style={{ color: "#9ca3af", fontSize: 9 }}>FL</div><div style={{ color: "#111827", fontWeight: 600 }}>{sleeve.fl_text || "-"}</div></div>
+        <div><div style={{ color: "#9ca3af", fontSize: 9 }}>種別</div><div style={{ color: "#374151" }}>{sleeve.label_text || "-"}</div></div>
+        <div><div style={{ color: "#9ca3af", fontSize: 9 }}>座標</div><div style={{ color: "#374151", fontSize: 11 }}>({sleeve.center[0].toFixed(0)}, {sleeve.center[1].toFixed(0)})</div></div>
       </div>
 
-      {/* Check results */}
-      <div style={{ fontSize: 12 }}>
-        <div style={{ color: "#6b7280", fontSize: 10, textTransform: "uppercase", marginBottom: 6 }}>
-          チェック結果 ({sleeveResults.length})
-        </div>
-
-        {ngResults.length > 0 && (
-          <div style={{ marginBottom: 10 }}>
-            {ngResults.map((r, i) => (
-              <div key={i} style={{
-                padding: "6px 10px", marginBottom: 3, borderRadius: 4,
-                background: "#991b1b20", borderLeft: "2px solid #f87171",
-              }}>
-                <span style={{ color: "#f87171", fontWeight: 600 }}>#{r.check_id}</span>
-                <span style={{ color: "#fca5a5", marginLeft: 6 }}>{r.check_name}</span>
-                <div style={{ color: "#d1d5db", fontSize: 11, marginTop: 2 }}>{r.message}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {warnResults.length > 0 && (
-          <div style={{ marginBottom: 10 }}>
-            {warnResults.map((r, i) => (
-              <div key={i} style={{
-                padding: "6px 10px", marginBottom: 3, borderRadius: 4,
-                background: "#92400e20", borderLeft: "2px solid #fbbf24",
-              }}>
-                <span style={{ color: "#fbbf24", fontWeight: 600 }}>#{r.check_id}</span>
-                <span style={{ color: "#fde68a", marginLeft: 6 }}>{r.check_name}</span>
-                <div style={{ color: "#d1d5db", fontSize: 11, marginTop: 2 }}>{r.message}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {okResults.length > 0 && (
-          <details style={{ color: "#6b7280" }}>
-            <summary style={{ cursor: "pointer", fontSize: 11 }}>OK ({okResults.length})</summary>
-            <div style={{ marginTop: 4 }}>
-              {okResults.map((r, i) => (
-                <div key={i} style={{ padding: "2px 0", fontSize: 11, color: "#4b5563" }}>
-                  #{r.check_id} {r.check_name}
-                </div>
-              ))}
+      {/* Issues */}
+      {(ngResults.length > 0 || warnResults.length > 0) && (
+        <div style={{ padding: "6px 14px 10px", borderTop: "1px solid #f3f4f6" }}>
+          {ngResults.map((r, i) => (
+            <div key={`ng${i}`} style={{ background: "#fef2f2", borderLeft: "2px solid #ef4444", padding: "5px 8px", borderRadius: "0 4px 4px 0", marginBottom: 3, fontSize: 10 }}>
+              <span style={{ color: "#dc2626", fontWeight: 600 }}>#{r.check_id}</span>{" "}
+              <span style={{ color: "#7f1d1d" }}>{r.check_name}</span>
+              <div style={{ color: "#6b7280", marginTop: 1 }}>{r.message}</div>
             </div>
-          </details>
-        )}
-      </div>
+          ))}
+          {warnResults.map((r, i) => (
+            <div key={`w${i}`} style={{ background: "#fffbeb", borderLeft: "2px solid #fbbf24", padding: "5px 8px", borderRadius: "0 4px 4px 0", marginBottom: 3, fontSize: 10 }}>
+              <span style={{ color: "#d97706", fontWeight: 600 }}>#{r.check_id}</span>{" "}
+              <span style={{ color: "#92400e" }}>{r.check_name}</span>
+              <div style={{ color: "#6b7280", marginTop: 1 }}>{r.message}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -3,55 +3,62 @@ import type { FloorData, Sleeve, CheckResult } from "./types";
 import { parseFloor, runChecks } from "./api";
 import DrawingView from "./components/DrawingView";
 import SleeveInfo from "./components/SleeveInfo";
-import ResultsTable from "./components/ResultsTable";
+import ListView from "./components/ListView";
 
-type FloorTab = "2f" | "1f";
-type ColorMode = "severity" | "fl";
+type ViewMode = "drawing" | "list";
+type ColorMode = "severity" | "fl" | "discipline";
+
+interface FloorEntry {
+  id: string;
+  label: string;
+  data: FloorData | null;
+  results: CheckResult[];
+}
 
 function App() {
-  const [floor2f, setFloor2f] = useState<FloorData | null>(null);
-  const [floor1f, setFloor1f] = useState<FloorData | null>(null);
-  const [results2f, setResults2f] = useState<CheckResult[]>([]);
-  const [results1f, setResults1f] = useState<CheckResult[]>([]);
+  const [floors, setFloors] = useState<FloorEntry[]>([
+    { id: "2f", label: "2F", data: null, results: [] },
+    { id: "1f", label: "1F", data: null, results: [] },
+  ]);
+  const [activeFloorIdx, setActiveFloorIdx] = useState(0);
+  const [viewMode, setViewMode] = useState<ViewMode>("drawing");
+  const [colorMode, setColorMode] = useState<ColorMode>("severity");
   const [loading, setLoading] = useState(false);
   const [hoveredSleeve, setHoveredSleeve] = useState<Sleeve | null>(null);
   const [selectedSleeve, setSelectedSleeve] = useState<Sleeve | null>(null);
-  const [filter, setFilter] = useState<"\u5168\u3066" | "NG" | "WARNING" | "OK">("\u5168\u3066");
-  const [activeFloor, setActiveFloor] = useState<FloorTab>("2f");
-  const [colorMode, setColorMode] = useState<ColorMode>("severity");
-
-  // Layer visibility
+  const [filter, setFilter] = useState<"all" | "NG" | "WARNING" | "OK">("all");
   const [layers, setLayers] = useState({
-    grid: true,
-    wall: true,
-    step: true,
-    sleeve: true,
-    lowerWall: false,
+    grid: true, wall: true, step: true, sleeve: true, lowerWall: false,
   });
+
   const toggleLayer = (key: keyof typeof layers) =>
-    setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+    setLayers((p) => ({ ...p, [key]: !p[key] }));
+
+  const activeFloor = floors[activeFloorIdx];
+  const floorData = activeFloor.data;
+  const results = activeFloor.results;
+  const displaySleeve = hoveredSleeve || selectedSleeve;
+
+  // Find 1F data for wall interference overlay
+  const floor1fData = floors.find((f) => f.id === "1f")?.data ?? null;
 
   const handleRun = async () => {
     setLoading(true);
     try {
       const [data2f, data1f] = await Promise.all([parseFloor("2f"), parseFloor("1f")]);
-      setFloor2f(data2f);
-      setFloor1f(data1f);
       const [check2f, check1f] = await Promise.all([
         runChecks("2f", "1f"),
         runChecks("1f"),
       ]);
-      setResults2f(check2f.results);
-      setResults1f(check1f.results);
+      setFloors([
+        { id: "2f", label: "2F", data: data2f, results: check2f.results },
+        { id: "1f", label: "1F", data: data1f, results: check1f.results },
+      ]);
     } catch (e) {
       console.error(e);
     }
     setLoading(false);
   };
-
-  const floorData = activeFloor === "2f" ? floor2f : floor1f;
-  const results = activeFloor === "2f" ? results2f : results1f;
-  const displaySleeve = hoveredSleeve || selectedSleeve;
 
   // Sleeve-level summary
   const sleeveSummary = useMemo(() => {
@@ -74,121 +81,174 @@ function App() {
   }, [floorData, results]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#111827", color: "#e5e7eb", fontFamily: "'Segoe UI', 'Noto Sans JP', sans-serif" }}>
-      {/* Header */}
-      <div style={{ padding: "10px 20px", background: "#1f2937", borderBottom: "1px solid #374151", display: "flex", alignItems: "center", gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "#f9fafb" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#f8fafc", color: "#111827", fontFamily: "'Inter', 'Noto Sans JP', -apple-system, sans-serif" }}>
+      {/* Row 1: Header */}
+      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "10px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 16, fontWeight: 700, color: "#111827", letterSpacing: -0.3 }}>
           スリーブチェッカー
-        </h1>
+        </span>
 
-        {/* Floor tabs */}
-        <div style={{ display: "flex", gap: 2, marginLeft: 16, background: "#374151", borderRadius: 6, padding: 2 }}>
-          {([["2f", "2階"], ["1f", "1階"]] as const).map(([id, label]) => (
-            <button key={id} onClick={() => { setActiveFloor(id); setSelectedSleeve(null); setHoveredSleeve(null); }}
+        {/* View toggle */}
+        <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 7, padding: 2, gap: 2, fontSize: 12, marginLeft: 12 }}>
+          {([["drawing", "図面"], ["list", "一覧"]] as const).map(([mode, label]) => (
+            <button key={mode} onClick={() => setViewMode(mode)}
               style={{
-                padding: "4px 16px", border: "none", borderRadius: 4, fontSize: 13, cursor: "pointer",
-                background: activeFloor === id ? "#3b82f6" : "transparent",
-                color: activeFloor === id ? "#fff" : "#9ca3af",
-              }}>
-              {label}
-            </button>
+                padding: "4px 14px", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: viewMode === mode ? 500 : 400,
+                background: viewMode === mode ? "#111827" : "transparent",
+                color: viewMode === mode ? "#fff" : "#9ca3af",
+              }}>{label}</button>
           ))}
         </div>
 
-        <button onClick={handleRun} disabled={loading}
-          style={{
-            padding: "6px 20px", background: loading ? "#4b5563" : "#3b82f6",
-            color: "#fff", border: "none", borderRadius: 6, cursor: loading ? "default" : "pointer",
-            fontSize: 13, fontWeight: 500,
-          }}>
-          {loading ? "解析中..." : "チェック実行"}
-        </button>
+        {!floorData && (
+          <button onClick={handleRun} disabled={loading}
+            style={{
+              padding: "5px 16px", background: loading ? "#d1d5db" : "#2563eb",
+              color: "#fff", border: "none", borderRadius: 6, cursor: loading ? "default" : "pointer",
+              fontSize: 12, fontWeight: 500, marginLeft: 8,
+            }}>
+            {loading ? "解析中..." : "チェック実行"}
+          </button>
+        )}
 
-        {/* Sleeve-level summary */}
+        {/* Summary */}
         {sleeveSummary && (
-          <div style={{ display: "flex", gap: 16, marginLeft: "auto", fontSize: 13 }}>
-            <span style={{ color: "#9ca3af" }}>スリーブ: {sleeveSummary.total}</span>
-            <span style={{ color: "#f87171", fontWeight: 600 }}>NG: {sleeveSummary.ng}</span>
-            <span style={{ color: "#fbbf24", fontWeight: 600 }}>WARN: {sleeveSummary.warning}</span>
-            <span style={{ color: "#34d399", fontWeight: 600 }}>OK: {sleeveSummary.ok}</span>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, fontSize: 11, alignItems: "center" }}>
+            <span style={{ color: "#9ca3af" }}>{sleeveSummary.total} スリーブ</span>
+            <span style={{ background: "#fef2f2", color: "#dc2626", padding: "1px 8px", borderRadius: 4, fontWeight: 600 }}>{sleeveSummary.ng} NG</span>
+            <span style={{ background: "#fffbeb", color: "#d97706", padding: "1px 8px", borderRadius: 4, fontWeight: 600 }}>{sleeveSummary.warning} WARN</span>
+            <span style={{ background: "#f0fdf4", color: "#16a34a", padding: "1px 8px", borderRadius: 4, fontWeight: 600 }}>{sleeveSummary.ok} OK</span>
           </div>
         )}
       </div>
 
-      {/* Controls bar */}
-      {floorData && (
-        <div style={{ padding: "6px 20px", background: "#1a2332", borderBottom: "1px solid #2d3748", display: "flex", gap: 12, alignItems: "center", fontSize: 12 }}>
-          <span style={{ color: "#6b7280" }}>レイヤー:</span>
-          {([
-            ["grid", "通り芯", "#6b7280"],
-            ["wall", "壁", "#8b9dc3"],
-            ["step", "段差線", "#d97706"],
-            ["sleeve", "スリーブ", "#60a5fa"],
-            ...(activeFloor === "2f" ? [["lowerWall", "1F壁(干渉)", "#a78bfa"] as const] : []),
-          ] as const).map(([key, label, color]) => (
-            <button key={key}
-              onClick={() => toggleLayer(key as keyof typeof layers)}
+      {/* Row 2: Floor tabs + controls */}
+      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "6px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Floor segment */}
+        <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 7, padding: 2, gap: 2, fontSize: 12 }}>
+          {floors.map((f, i) => (
+            <button key={f.id}
+              onClick={() => { setActiveFloorIdx(i); setSelectedSleeve(null); setHoveredSleeve(null); }}
               style={{
-                padding: "2px 10px", borderRadius: 3, fontSize: 11, cursor: "pointer",
-                border: `1px solid ${layers[key as keyof typeof layers] ? color : "#4b5563"}`,
-                background: layers[key as keyof typeof layers] ? color + "20" : "transparent",
-                color: layers[key as keyof typeof layers] ? color : "#6b7280",
-              }}>
-              {label}
-            </button>
-          ))}
-          <span style={{ color: "#4b5563" }}>|</span>
-          <span style={{ color: "#6b7280" }}>色分け:</span>
-          {([["severity", "判定結果"], ["fl", "FL高さ"]] as const).map(([mode, label]) => (
-            <button key={mode} onClick={() => setColorMode(mode)}
-              style={{
-                padding: "2px 10px", borderRadius: 3, fontSize: 11, cursor: "pointer",
-                border: `1px solid ${colorMode === mode ? "#60a5fa" : "#4b5563"}`,
-                background: colorMode === mode ? "#60a5fa20" : "transparent",
-                color: colorMode === mode ? "#60a5fa" : "#6b7280",
-              }}>
-              {label}
-            </button>
+                padding: "4px 16px", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12,
+                fontWeight: activeFloorIdx === i ? 500 : 400,
+                background: activeFloorIdx === i ? "#fff" : "transparent",
+                color: activeFloorIdx === i ? "#111827" : "#9ca3af",
+                boxShadow: activeFloorIdx === i ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+              }}>{f.label}</button>
           ))}
         </div>
-      )}
+        <button style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
+          + DXF追加
+        </button>
 
-      {/* Main content */}
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        {/* Drawing */}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          {floorData ? (
-            <DrawingView
-              floorData={floorData}
-              lowerFloorData={activeFloor === "2f" && layers.lowerWall ? floor1f : null}
-              results={results}
-              onSleeveHover={setHoveredSleeve}
-              onSleeveClick={setSelectedSleeve}
-              selectedSleeveId={selectedSleeve?.id || null}
-              layers={layers}
-              colorMode={colorMode}
-            />
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#4b5563" }}>
-              「チェック実行」を押してください
+        {/* List mode filters */}
+        {viewMode === "list" && (
+          <div style={{ marginLeft: "auto", display: "flex", gap: 4, fontSize: 11 }}>
+            {([["all", "全て"], ["NG", "NG"], ["WARNING", "WARN"], ["OK", "OK"]] as const).map(([val, label]) => {
+              const isActive = filter === val;
+              const colors: Record<string, { border: string; color: string; bg: string }> = {
+                NG: { border: "#fecaca", color: "#dc2626", bg: "#fef2f2" },
+                WARNING: { border: "#fde68a", color: "#d97706", bg: "#fffbeb" },
+                OK: { border: "#bbf7d0", color: "#16a34a", bg: "#f0fdf4" },
+              };
+              const c = colors[val];
+              return (
+                <button key={val} onClick={() => setFilter(val)}
+                  style={{
+                    padding: "3px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, border: "1px solid",
+                    borderColor: isActive ? (c?.border || "#d1d5db") : "#e5e7eb",
+                    background: isActive ? (c?.bg || "#f3f4f6") : "#fff",
+                    color: c?.color || "#111827",
+                    fontWeight: isActive ? 500 : 400,
+                  }}>{label}</button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Drawing mode layer controls */}
+        {viewMode === "drawing" && floorData && (
+          <>
+            <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
+            <span style={{ color: "#9ca3af", fontSize: 10 }}>レイヤー</span>
+            {([
+              ["grid", "通り芯", "#3b82f6", "#eff6ff", "#93c5fd"],
+              ["wall", "壁", "#6b7280", "#fff", "#d1d5db"],
+              ["step", "段差線", "#b45309", "#fffbeb", "#fbbf24"],
+              ["sleeve", "スリーブ", "#16a34a", "#f0fdf4", "#86efac"],
+              ...(activeFloor.id === "2f" ? [["lowerWall", "1F壁", "#9ca3af", "#fff", "#d1d5db"]] : []),
+            ] as string[][]).map(([key, label, color, bg, border]) => (
+              <button key={key}
+                onClick={() => toggleLayer(key as keyof typeof layers)}
+                style={{
+                  padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
+                  border: `1px solid ${layers[key as keyof typeof layers] ? border : "#e5e7eb"}`,
+                  background: layers[key as keyof typeof layers] ? bg : "#fff",
+                  color: layers[key as keyof typeof layers] ? color : "#d1d5db",
+                }}>{label}</button>
+            ))}
+
+            <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
+            <span style={{ color: "#9ca3af", fontSize: 10 }}>色分け</span>
+            <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 5, padding: 2, gap: 1 }}>
+              {([["severity", "判定"], ["fl", "FL高さ"], ["discipline", "設備"]] as const).map(([mode, label]) => (
+                <button key={mode} onClick={() => setColorMode(mode)}
+                  style={{
+                    padding: "2px 10px", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 10,
+                    fontWeight: colorMode === mode ? 500 : 400,
+                    background: colorMode === mode ? "#fff" : "transparent",
+                    color: colorMode === mode ? "#111827" : "#9ca3af",
+                    boxShadow: colorMode === mode ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                  }}>{label}</button>
+              ))}
             </div>
-          )}
-        </div>
-
-        {/* Right panel */}
-        <div style={{ width: 340, borderLeft: "1px solid #2d3748", background: "#1a2332", display: "flex", flexDirection: "column", overflow: "auto" }}>
-          <SleeveInfo sleeve={displaySleeve} results={results} />
-        </div>
+          </>
+        )}
       </div>
 
-      {/* Bottom panel */}
-      <div style={{ height: 280, borderTop: "1px solid #2d3748", background: "#1a2332", overflow: "auto", padding: "8px 16px" }}>
-        <ResultsTable
-          results={results}
-          selectedSleeveId={selectedSleeve?.id || null}
-          filter={filter}
-          onFilterChange={setFilter}
-        />
+      {/* Main content */}
+      <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
+        {viewMode === "drawing" ? (
+          <>
+            <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+              {floorData ? (
+                <>
+                  <DrawingView
+                    floorData={floorData}
+                    lowerFloorData={activeFloor.id === "2f" && layers.lowerWall ? floor1fData : null}
+                    results={results}
+                    onSleeveHover={setHoveredSleeve}
+                    onSleeveClick={setSelectedSleeve}
+                    selectedSleeveId={selectedSleeve?.id || null}
+                    layers={layers}
+                    colorMode={colorMode}
+                  />
+                  {/* Floating detail card */}
+                  {displaySleeve && (
+                    <div style={{ position: "absolute", bottom: 16, right: 16, zIndex: 10 }}>
+                      <SleeveInfo sleeve={displaySleeve} results={results} />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
+                  「チェック実行」を押してください
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, overflow: "auto" }}>
+            {floorData ? (
+              <ListView floorData={floorData} results={results} filter={filter} />
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
+                「チェック実行」を押してください
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
