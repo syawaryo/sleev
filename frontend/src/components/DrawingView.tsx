@@ -73,29 +73,29 @@ export default function DrawingView({
         {layers.grid && floorData.grid_lines.map((g, i) =>
           g.direction === "H" ? (
             <line key={`gh${i}`} x1={-5000} y1={g.position} x2={85000} y2={g.position}
-              stroke="#e5e7eb" strokeWidth={12} strokeDasharray="200,100" />
+              stroke="#9ca3af" strokeWidth={15} strokeDasharray="300,150" />
           ) : (
             <line key={`gv${i}`} x1={g.position} y1={-5000} x2={g.position} y2={40000}
-              stroke="#e5e7eb" strokeWidth={12} strokeDasharray="200,100" />
+              stroke="#9ca3af" strokeWidth={15} strokeDasharray="300,150" />
           )
         )}
 
         {/* Lower floor walls */}
         {layers.lowerWall && lowerFloorData?.wall_lines.map((w, i) => (
           <line key={`lw${i}`} x1={w.start[0]} y1={w.start[1]} x2={w.end[0]} y2={w.end[1]}
-            stroke="#c4b5fd" strokeWidth={35} opacity={0.25} />
+            stroke="#8b5cf6" strokeWidth={40} opacity={0.4} />
         ))}
 
         {/* Walls */}
         {layers.wall && floorData.wall_lines.map((w, i) => (
           <line key={`w${i}`} x1={w.start[0]} y1={w.start[1]} x2={w.end[0]} y2={w.end[1]}
-            stroke="#cbd5e1" strokeWidth={20} />
+            stroke="#64748b" strokeWidth={25} />
         ))}
 
         {/* Step lines */}
         {layers.step && floorData.step_lines.map((s, i) => (
           <line key={`s${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
-            stroke="#f59e0b" strokeWidth={15} opacity={0.35} />
+            stroke="#d97706" strokeWidth={20} opacity={0.6} />
         ))}
 
         {/* Sleeves */}

@@ -103,7 +103,7 @@ function App() {
         {!floorData && (
           <button onClick={handleRun} disabled={loading}
             style={{
-              padding: "5px 16px", background: loading ? "#d1d5db" : "#2563eb",
+              padding: "5px 16px", background: loading ? "#d1d5db" : "#ff4b4b",
               color: "#fff", border: "none", borderRadius: 6, cursor: loading ? "default" : "pointer",
               fontSize: 12, fontWeight: 500, marginLeft: 8,
             }}>
@@ -211,29 +211,32 @@ function App() {
       <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
         {viewMode === "drawing" ? (
           <>
-            <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+            {/* Drawing area */}
+            <div style={{ flex: 1, overflow: "hidden" }}>
               {floorData ? (
-                <>
-                  <DrawingView
-                    floorData={floorData}
-                    lowerFloorData={activeFloor.id === "2f" && layers.lowerWall ? floor1fData : null}
-                    results={results}
-                    onSleeveHover={setHoveredSleeve}
-                    onSleeveClick={setSelectedSleeve}
-                    selectedSleeveId={selectedSleeve?.id || null}
-                    layers={layers}
-                    colorMode={colorMode}
-                  />
-                  {/* Floating detail card */}
-                  {displaySleeve && (
-                    <div style={{ position: "absolute", bottom: 16, right: 16, zIndex: 10 }}>
-                      <SleeveInfo sleeve={displaySleeve} results={results} />
-                    </div>
-                  )}
-                </>
+                <DrawingView
+                  floorData={floorData}
+                  lowerFloorData={activeFloor.id === "2f" && layers.lowerWall ? floor1fData : null}
+                  results={results}
+                  onSleeveHover={setHoveredSleeve}
+                  onSleeveClick={setSelectedSleeve}
+                  selectedSleeveId={selectedSleeve?.id || null}
+                  layers={layers}
+                  colorMode={colorMode}
+                />
               ) : (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
                   「チェック実行」を押してください
+                </div>
+              )}
+            </div>
+            {/* Right sidebar */}
+            <div style={{ width: 300, borderLeft: "1px solid #e5e7eb", background: "#fff", overflow: "auto", flexShrink: 0 }}>
+              {displaySleeve ? (
+                <SleeveInfo sleeve={displaySleeve} results={results} />
+              ) : (
+                <div style={{ padding: 20, color: "#9ca3af", fontSize: 13, textAlign: "center", marginTop: 40 }}>
+                  スリーブにカーソルを合わせると<br />詳細が表示されます
                 </div>
               )}
             </div>
