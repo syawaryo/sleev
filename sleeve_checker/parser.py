@@ -205,6 +205,14 @@ def _extract_sleeves(doc, msp) -> list[Sleeve]:
         cos_r = math.cos(rot_rad)
         sin_r = math.sin(rot_rad)
 
+        # Only process blocks whose name starts with a sleeve/box keyword.
+        # INS-G* composite blocks (slab labels, etc.) are NOT sleeves.
+        _is_sleeve_block = any(
+            kw in block_name for kw in ("スリーブ", "箱", "電気パイプ")
+        )
+        if not _is_sleeve_block:
+            continue
+
         circles = get_circles(block_name)
 
         if circles:
@@ -288,6 +296,7 @@ def _extract_grid_lines(doc, msp) -> list[GridLine]:
 
     _H_DEDUP = 50.0
     _V_DEDUP = 50.0
+    _MIN_GRID_LENGTH = 10_000.0  # grid lines must be ≥10m to filter noise
 
     h_positions: list[float] = []  # unique Y values for H lines
     v_positions: list[float] = []  # unique X values for V lines
@@ -295,14 +304,20 @@ def _extract_grid_lines(doc, msp) -> list[GridLine]:
     for line in _entities_on_layers(msp, grid_layers, "LINE"):
         sx, sy = line.dxf.start.x, line.dxf.start.y
         ex, ey = line.dxf.end.x, line.dxf.end.y
+
+        dx = abs(ex - sx)
+        dy = abs(ey - sy)
+        length = math.hypot(dx, dy)
+
+        # Filter out short lines (not actual grid lines)
+        if length < _MIN_GRID_LENGTH:
+            continue
+
         mx = (sx + ex) / 2.0
         my = (sy + ey) / 2.0
 
         if not _in_building_range(mx, my):
             continue
-
-        dx = abs(ex - sx)
-        dy = abs(ey - sy)
 
         if dx > dy:
             # Horizontal: position = Y
