@@ -588,23 +588,25 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp) -> None:
       the building range.
     - For each sleeve, find the nearest text matching a φ-pattern → label_text.
     - For each sleeve, find the nearest text matching an FL-pattern → fl_text.
-    - Search radius: _LABEL_SEARCH_RADIUS (1500 mm).
+      * First look on the sleeve's own layer (existing logic, radius 1500 mm).
+      * If no FL found there, fall back to the nearest FL zone point from slab
+        label layers (F308_スラブ / スラブラベル) — no radius limit, pure
+        nearest-neighbour.  The stored value is just the FL part (e.g.
+        ``"FL-225"``), not the full slab label text.
+    - Search radius: _LABEL_SEARCH_RADIUS (1500 mm) for sleeve-layer texts.
     - Y-coordinate proximity is weighted double (match spec: Y-coord priority).
     """
     sleeve_layers = set(_find_layers(doc, "スリーブ"))
 
-    # Also search some neighbouring layers for FL texts
-    fl_extra_layers = set(_find_layers_any(doc, ["F308_スラブ", "スラブラベル"]))
-
-    # Build candidate text list
-    candidates: list[tuple[float, float, str]] = []  # (x, y, text)
+    # Build candidate text list from sleeve layers only (for φ and same-layer FL)
+    sleeve_candidates: list[tuple[float, float, str]] = []  # (x, y, text)
 
     for entity in msp:
         if entity.dxftype() not in ("TEXT", "MTEXT"):
             continue
 
         layer = entity.dxf.layer
-        if layer not in sleeve_layers and layer not in fl_extra_layers:
+        if layer not in sleeve_layers:
             continue
 
         try:
@@ -623,12 +625,12 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp) -> None:
             if not _in_building_range(x, y):
                 continue
 
-            candidates.append((x, y, txt))
+            sleeve_candidates.append((x, y, txt))
         except Exception:
             continue
 
-    if not candidates:
-        return
+    # Build FL zones from slab label layers for fallback nearest-zone lookup
+    fl_zones = _build_fl_zones(doc, msp)
 
     for sleeve in sleeves:
         cx, cy = sleeve.center
@@ -638,7 +640,7 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp) -> None:
         best_fl_dist = float("inf")
         best_fl_txt: str | None = None
 
-        for tx, ty, txt in candidates:
+        for tx, ty, txt in sleeve_candidates:
             # Y-priority weighted distance
             dx = tx - cx
             dy = (ty - cy) * 0.5  # halve Y so it's "double-weighted" in proximity
@@ -657,8 +659,69 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp) -> None:
 
         if best_phi_txt is not None:
             sleeve.label_text = best_phi_txt
+
         if best_fl_txt is not None:
+            # Found FL on the sleeve's own layer — use as-is
             sleeve.fl_text = best_fl_txt
+        elif fl_zones:
+            # Fallback: find the nearest slab FL zone point (no radius limit)
+            best_zone_dist = float("inf")
+            best_zone_fl: str | None = None
+            for zx, zy, fl_val in fl_zones:
+                dist = math.hypot(zx - cx, zy - cy)
+                if dist < best_zone_dist:
+                    best_zone_dist = dist
+                    best_zone_fl = fl_val
+            if best_zone_fl is not None:
+                sleeve.fl_text = best_zone_fl
+
+
+# ---------------------------------------------------------------------------
+# FL zone helpers (slab label → positional FL lookup)
+# ---------------------------------------------------------------------------
+
+def _build_fl_zones(doc, msp) -> list[tuple[float, float, str]]:
+    """
+    Collect all TEXT/MTEXT entities on slab label layers (F308_スラブ,
+    スラブラベル) that contain an FL pattern, and return them as a list of
+    ``(x, y, fl_value)`` tuples where *fl_value* is the normalised FL string
+    (e.g. ``"FL-225"``).
+
+    These tuples form "FL zones": a sleeve with no FL text on its own layer can
+    find the nearest zone point and inherit its FL value.
+    """
+    slab_layers = set(_find_layers_any(doc, ["F308_スラブ", "スラブラベル"]))
+    fl_pattern = re.compile(r"FL\s*[+\-]\s*\d+", re.IGNORECASE)
+
+    zones: list[tuple[float, float, str]] = []
+
+    for entity in msp:
+        if entity.dxf.layer not in slab_layers:
+            continue
+        if entity.dxftype() not in ("TEXT", "MTEXT"):
+            continue
+
+        try:
+            if entity.dxftype() == "TEXT":
+                raw = entity.dxf.text or ""
+            else:
+                raw = entity.plain_mtext() or ""
+
+            pos = entity.dxf.insert
+            x, y = float(pos.x), float(pos.y)
+
+            if not _in_building_range(x, y):
+                continue
+
+            match = fl_pattern.search(raw)
+            if match:
+                # Normalise: remove spaces e.g. 'FL - 750' → 'FL-750'
+                fl_value = re.sub(r"\s+", "", match.group(0)).upper()
+                zones.append((x, y, fl_value))
+        except Exception:
+            continue
+
+    return zones
 
 
 # ---------------------------------------------------------------------------
