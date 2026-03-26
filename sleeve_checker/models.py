@@ -1,0 +1,73 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Sleeve:
+    id: str
+    center: tuple[float, float]
+    diameter: float
+    label_text: str | None = None
+    fl_text: str | None = None
+    pn_number: str | None = None
+    layer: str = ""
+    discipline: str = ""
+
+
+@dataclass
+class GridLine:
+    axis_label: str
+    direction: str  # "H" or "V"
+    position: float
+
+
+@dataclass
+class DimLine:
+    layer: str
+    measurement: float
+    defpoint1: tuple[float, float]
+    defpoint2: tuple[float, float]
+    text_override: str | None = None
+
+
+@dataclass
+class WallLine:
+    start: tuple[float, float]
+    end: tuple[float, float]
+    layer: str = ""
+    wall_type: str = "不明"
+
+
+@dataclass
+class StepLine:
+    start: tuple[float, float]
+    end: tuple[float, float]
+    layer: str = ""
+
+
+@dataclass
+class ColumnLine:
+    start: tuple[float, float]
+    end: tuple[float, float]
+    layer: str = ""
+
+
+@dataclass
+class FloorData:
+    sleeves: list[Sleeve] = field(default_factory=list)
+    grid_lines: list[GridLine] = field(default_factory=list)
+    dim_lines: list[DimLine] = field(default_factory=list)
+    wall_lines: list[WallLine] = field(default_factory=list)
+    step_lines: list[StepLine] = field(default_factory=list)
+    column_lines: list[ColumnLine] = field(default_factory=list)
+    slab_level: str | None = None
+
+
+@dataclass
+class CheckResult:
+    check_id: int
+    check_name: str
+    severity: str  # "NG" / "WARNING" / "OK"
+    sleeve: Sleeve | None = None
+    message: str = ""
+    related_coords: list[tuple[float, float]] = field(default_factory=list)
