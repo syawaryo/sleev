@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.dwg
+dxf_output/
+.env
