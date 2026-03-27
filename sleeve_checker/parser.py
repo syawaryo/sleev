@@ -19,6 +19,7 @@ from .models import (
     DimLine,
     FloorData,
     GridLine,
+    PnLabel,
     SlabLabel,
     SlabOutline,
     SlabZone,
@@ -799,6 +800,29 @@ def _extract_slab_zones(doc, msp) -> list[SlabZone]:
 
 
 # ---------------------------------------------------------------------------
+# P-N label extraction
+# ---------------------------------------------------------------------------
+
+def _extract_pn_labels(doc, msp) -> list[PnLabel]:
+    """Extract P-N-xx texts from the drawing."""
+    pn_pattern = re.compile(r"P-N-(\d+)")
+    labels: list[PnLabel] = []
+    for entity in msp:
+        if entity.dxftype() != "TEXT":
+            continue
+        raw = (entity.dxf.text or "").strip()
+        m = pn_pattern.search(raw)
+        if not m:
+            continue
+        x, y = entity.dxf.insert.x, entity.dxf.insert.y
+        if not _in_building_range(x, y):
+            continue
+        labels.append(PnLabel(x=x, y=y, text=raw, number=int(m.group(1))))
+    labels.sort(key=lambda p: p.number)
+    return labels
+
+
+# ---------------------------------------------------------------------------
 # Slab label block extraction (S15, S16 etc. with level/thickness)
 # ---------------------------------------------------------------------------
 
@@ -1012,6 +1036,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     _attach_label_texts(sleeves, doc, msp, step_lines=step_lines)
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
+    pn_labels = _extract_pn_labels(doc, msp)
     slab_zones = _extract_slab_zones(doc, msp)
     slab_zones.extend(_extract_step_labels(doc, msp))
     slab_outlines = _extract_slab_outlines(doc, msp)
@@ -1028,5 +1053,6 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         slab_zones=slab_zones,
         slab_outlines=slab_outlines,
         slab_labels=slab_labels,
+        pn_labels=pn_labels,
         slab_level=slab_level,
     )

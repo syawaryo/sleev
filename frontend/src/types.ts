@@ -57,6 +57,13 @@ export interface SlabLabel {
   thickness: string;    // "165"
 }
 
+export interface PnLabel {
+  x: number;
+  y: number;
+  text: string;  // "P-N-1"
+  number: number;
+}
+
 export interface SlabOutline {
   start: [number, number];
   end: [number, number];
@@ -72,6 +79,7 @@ export interface FloorData {
   slab_zones: SlabZone[];
   slab_outlines: SlabOutline[];
   slab_labels: SlabLabel[];
+  pn_labels: PnLabel[];
   slab_level: string | null;
 }
 

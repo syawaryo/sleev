@@ -206,6 +206,17 @@ export default function DrawingView({
           </g>
         ))}
 
+        {/* P-N number labels from DXF */}
+        {layers.sleeve && floorData.pn_labels?.map((pn, i) => (
+          <g key={`pn${i}`} transform={`translate(${pn.x},${pn.y})`}>
+            <g transform="scale(1,-1)">
+              <text x={0} y={0} fontSize={150} fill="#e11d48" fontWeight={700} textAnchor="middle" opacity={0.8}>
+                {pn.text}
+              </text>
+            </g>
+          </g>
+        ))}
+
         {/* Sleeves */}
         {layers.sleeve && floorData.sleeves.map((s) => {
           const colors = getSleeveColors(s);

@@ -61,6 +61,14 @@ class SlabZone:
 
 
 @dataclass
+class PnLabel:
+    x: float
+    y: float
+    text: str     # "P-N-1"
+    number: int
+
+
+@dataclass
 class SlabLabel:
     x: float
     y: float
@@ -86,6 +94,7 @@ class FloorData:
     slab_zones: list[SlabZone] = field(default_factory=list)
     slab_outlines: list[SlabOutline] = field(default_factory=list)
     slab_labels: list[SlabLabel] = field(default_factory=list)
+    pn_labels: list[PnLabel] = field(default_factory=list)
     slab_level: str | None = None
 
 
