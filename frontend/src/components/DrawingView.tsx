@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useRef, useCallback } from "react";
 import type { FloorData, Sleeve, CheckResult } from "../types";
 
 interface Props {
@@ -35,10 +35,90 @@ const DISC_COLORS: Record<string, string> = {
   "建築": "#6b7280",
 };
 
+const INITIAL_VB = { x: -5000, y: -40000, w: 90000, h: 45000 };
+const ZOOM_FACTOR = 1.15;
+const MIN_ZOOM_W = 5000;
+const MAX_ZOOM_W = 200000;
+
 export default function DrawingView({
   floorData, lowerFloorData, results, onSleeveHover, onSleeveClick,
   selectedSleeveId, layers, colorMode,
 }: Props) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [vb, setVb] = useState(INITIAL_VB);
+  const [isPanning, setIsPanning] = useState(false);
+  const panStart = useRef<{ x: number; y: number; vb: typeof INITIAL_VB } | null>(null);
+
+  // Convert screen coords to SVG coords
+  const screenToSvg = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const rect = svg.getBoundingClientRect();
+    const sx = (clientX - rect.left) / rect.width;
+    const sy = (clientY - rect.top) / rect.height;
+    return { x: vb.x + sx * vb.w, y: vb.y + sy * vb.h };
+  }, [vb]);
+
+  // Wheel zoom (pinch on trackpad)
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    // Get cursor position in SVG space
+    const pt = screenToSvg(e.clientX, e.clientY);
+
+    let factor: number;
+    if (e.ctrlKey) {
+      // Pinch zoom (trackpad)
+      factor = e.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+    } else {
+      // Scroll wheel
+      factor = e.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+    }
+
+    setVb((prev) => {
+      const newW = Math.min(Math.max(prev.w * factor, MIN_ZOOM_W), MAX_ZOOM_W);
+      const newH = Math.min(Math.max(prev.h * factor, MIN_ZOOM_W * 0.5), MAX_ZOOM_W * 0.5);
+      const ratio = newW / prev.w;
+      return {
+        x: pt.x - (pt.x - prev.x) * ratio,
+        y: pt.y - (pt.y - prev.y) * ratio,
+        w: newW,
+        h: newH,
+      };
+    });
+  }, [screenToSvg]);
+
+  // Pan (mouse drag)
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return; // left click only
+    setIsPanning(true);
+    panStart.current = { x: e.clientX, y: e.clientY, vb: { ...vb } };
+  }, [vb]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanning || !panStart.current || !svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const dx = (e.clientX - panStart.current.x) / rect.width * panStart.current.vb.w;
+    const dy = (e.clientY - panStart.current.y) / rect.height * panStart.current.vb.h;
+    setVb({
+      ...panStart.current.vb,
+      x: panStart.current.vb.x - dx,
+      y: panStart.current.vb.y - dy,
+    });
+  }, [isPanning]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsPanning(false);
+    panStart.current = null;
+  }, []);
+
+  // Double click to reset
+  const handleDoubleClick = useCallback(() => {
+    setVb(INITIAL_VB);
+  }, []);
+
   const severityMap = useMemo(() => {
     const map = new Map<string, "NG" | "WARNING" | "OK">();
     for (const r of results) {
@@ -64,10 +144,21 @@ export default function DrawingView({
     return SEVERITY_COLORS[severityMap.get(s.id) || "OK"];
   };
 
-  const viewBox = "-5000 -40000 90000 45000";
+  const viewBox = `${vb.x} ${vb.y} ${vb.w} ${vb.h}`;
 
   return (
-    <svg viewBox={viewBox} style={{ width: "100%", height: "100%", background: "#fdfdfe" }} xmlns="http://www.w3.org/2000/svg">
+    <svg
+      ref={svgRef}
+      viewBox={viewBox}
+      style={{ width: "100%", height: "100%", background: "#fdfdfe", cursor: isPanning ? "grabbing" : "grab" }}
+      xmlns="http://www.w3.org/2000/svg"
+      onWheel={handleWheel}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onDoubleClick={handleDoubleClick}
+    >
       <g transform="scale(1,-1)">
         {/* Grid lines */}
         {layers.grid && floorData.grid_lines.map((g, i) =>
@@ -105,8 +196,8 @@ export default function DrawingView({
           const r = Math.max(s.diameter / 2, 200);
           return (
             <g key={s.id} style={{ cursor: "pointer" }}
-              onMouseEnter={() => onSleeveHover(s)}
-              onClick={() => onSleeveClick(s)}>
+              onMouseEnter={(e) => { e.stopPropagation(); onSleeveHover(s); }}
+              onClick={(e) => { e.stopPropagation(); onSleeveClick(s); }}>
               {/* Hit area */}
               <circle cx={s.center[0]} cy={s.center[1]} r={r * 1.8} fill="transparent" stroke="none" />
               {/* Selection ring */}
