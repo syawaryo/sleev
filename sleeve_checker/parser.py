@@ -823,15 +823,117 @@ def _extract_pn_labels(doc, msp) -> list[PnLabel]:
 
 
 # ---------------------------------------------------------------------------
-# P-N to sleeve nearest-match assignment
+# Arrow HATCH extraction (filled triangles on 衛生通常 layer)
 # ---------------------------------------------------------------------------
 
-def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel]) -> None:
-    """Assign each P-N label to its nearest sleeve (simple nearest-neighbour)."""
+def _extract_arrow_hatches(doc, msp) -> list[tuple[float, float, list[tuple[float, float]]]]:
+    """
+    Extract arrow-shaped SOLID HATCHes on 衛生通常-like layers.
+
+    Returns a list of (center_x, center_y, vertices) tuples.
+    These triangular hatches sit between P-N text and the sleeve they point to.
+    """
+    target_layers = set(
+        _find_layers_any(doc, ["衛生"])
+    )
+    # Only keep layers with "通常" or generic ones
+    target_layers = {l for l in target_layers if "通常" in l or l.endswith("]0")}
+
+    arrows: list[tuple[float, float, list[tuple[float, float]]]] = []
+
+    for entity in msp:
+        if entity.dxftype() != "HATCH":
+            continue
+        if entity.dxf.layer not in target_layers:
+            continue
+        pattern = entity.dxf.get("pattern_name", "")
+        if pattern != "SOLID":
+            continue
+
+        try:
+            for path in entity.paths:
+                verts: list[tuple[float, float]] = []
+                if hasattr(path, "vertices"):
+                    verts = [(float(v[0]), float(v[1])) for v in path.vertices]
+                elif hasattr(path, "edges"):
+                    for edge in path.edges:
+                        if hasattr(edge, "start"):
+                            verts.append((float(edge.start[0]), float(edge.start[1])))
+
+                if len(verts) >= 3:
+                    cx = sum(v[0] for v in verts) / len(verts)
+                    cy = sum(v[1] for v in verts) / len(verts)
+                    if _in_building_range(cx, cy):
+                        arrows.append((cx, cy, verts))
+        except Exception:
+            continue
+
+    return arrows
+
+
+# ---------------------------------------------------------------------------
+# P-N to sleeve assignment via arrow HATCHes
+# ---------------------------------------------------------------------------
+
+def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel],
+                       doc=None, msp=None) -> None:
+    """
+    Assign each P-N label to its corresponding sleeve.
+
+    Strategy (arrow-tip method):
+    1. Extract arrow HATCH triangles from 衛生通常 layer.
+    2. For each arrow HATCH:
+       a. Find nearest P-N text to the arrow center (~165mm).
+       b. Find the arrow vertex closest to any sleeve = arrow tip.
+       c. Link: P-N ↔ arrow ↔ sleeve.
+    3. Remaining P-N labels without arrow matches fall back to nearest-neighbour.
+    """
     if not pn_labels or not sleeves:
         return
+
     used_sleeves: set[str] = set()
+    used_pns: set[str] = set()
+
+    # --- Phase 1: Arrow-based matching ---
+    if doc is not None and msp is not None:
+        arrows = _extract_arrow_hatches(doc, msp)
+
+        for acx, acy, verts in arrows:
+            # Find nearest P-N text to arrow center
+            best_pn_dist = float("inf")
+            best_pn: PnLabel | None = None
+            for pn in pn_labels:
+                if pn.text in used_pns:
+                    continue
+                d = math.hypot(acx - pn.x, acy - pn.y)
+                if d < best_pn_dist and d < 500:  # P-N should be very close to arrow
+                    best_pn_dist = d
+                    best_pn = pn
+
+            if best_pn is None:
+                continue
+
+            # Find arrow tip = vertex closest to any sleeve
+            best_tip_dist = float("inf")
+            best_sleeve: Sleeve | None = None
+            for vert in verts:
+                for s in sleeves:
+                    if s.id in used_sleeves:
+                        continue
+                    d = math.hypot(vert[0] - s.center[0], vert[1] - s.center[1])
+                    if d < best_tip_dist:
+                        best_tip_dist = d
+                        best_sleeve = s
+
+            if best_sleeve is not None and best_tip_dist < 3000:
+                best_sleeve.pn_number = best_pn.text
+                used_sleeves.add(best_sleeve.id)
+                used_pns.add(best_pn.text)
+
+    # --- Phase 2: Fallback nearest-neighbour for unmatched P-N labels ---
     for pn in sorted(pn_labels, key=lambda p: p.number):
+        if pn.text in used_pns:
+            continue
         best_dist = float("inf")
         best_sleeve: Sleeve | None = None
         for s in sleeves:
@@ -844,6 +946,7 @@ def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel]) -> None:
         if best_sleeve is not None:
             best_sleeve.pn_number = pn.text
             used_sleeves.add(best_sleeve.id)
+            used_pns.add(pn.text)
 
 
 # ---------------------------------------------------------------------------
@@ -1061,7 +1164,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
     pn_labels = _extract_pn_labels(doc, msp)
-    _attach_pn_numbers(sleeves, pn_labels)
+    _attach_pn_numbers(sleeves, pn_labels, doc=doc, msp=msp)
     slab_zones = _extract_slab_zones(doc, msp)
     slab_zones.extend(_extract_step_labels(doc, msp))
     slab_outlines = _extract_slab_outlines(doc, msp)
