@@ -19,6 +19,7 @@ from .models import (
     DimLine,
     FloorData,
     GridLine,
+    SlabZone,
     Sleeve,
     StepLine,
     WallLine,
@@ -725,6 +726,73 @@ def _build_fl_zones(doc, msp) -> list[tuple[float, float, str]]:
 
 
 # ---------------------------------------------------------------------------
+# Slab zone heatmap extraction
+# ---------------------------------------------------------------------------
+
+def _parse_fl_value(fl_text: str) -> int | None:
+    """Parse 'FL+40' or 'FL-360' into integer mm value."""
+    m = re.match(r"FL\s*([+\-])\s*(\d+)", fl_text, re.IGNORECASE)
+    if not m:
+        return None
+    sign = 1 if m.group(1) == "+" else -1
+    return sign * int(m.group(2))
+
+
+def _extract_slab_zones(doc, msp) -> list[SlabZone]:
+    """
+    Collect slab level texts from:
+    1. F308_スラブ / スラブラベル layers (slab labels)
+    2. 段差記号 layer (step level annotations like FL+40, FL-60)
+
+    Returns SlabZone objects with position and parsed FL value.
+    """
+    fl_pattern = re.compile(r"FL\s*[+\-]\s*\d+", re.IGNORECASE)
+    target_layers = set(
+        _find_layers_any(doc, ["F308_スラブ", "スラブラベル"])
+        + _find_layers_any(doc, ["段差記号", "段差"])
+    )
+
+    zones: list[SlabZone] = []
+    seen: set[tuple[float, float, str]] = set()
+
+    for entity in msp:
+        if entity.dxf.layer not in target_layers:
+            continue
+        if entity.dxftype() not in ("TEXT", "MTEXT"):
+            continue
+
+        try:
+            if entity.dxftype() == "TEXT":
+                raw = entity.dxf.text or ""
+            else:
+                raw = entity.plain_mtext() or ""
+
+            pos = entity.dxf.insert
+            x, y = float(pos.x), float(pos.y)
+
+            if not _in_building_range(x, y):
+                continue
+
+            match = fl_pattern.search(raw)
+            if match:
+                fl_text = re.sub(r"\s+", "", match.group(0)).upper()
+                fl_val = _parse_fl_value(fl_text)
+                if fl_val is None:
+                    continue
+
+                key = (round(x, 0), round(y, 0), fl_text)
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                zones.append(SlabZone(x=x, y=y, fl_text=fl_text, fl_value=fl_val))
+        except Exception:
+            continue
+
+    return zones
+
+
+# ---------------------------------------------------------------------------
 # Slab level extraction
 # ---------------------------------------------------------------------------
 
@@ -801,6 +869,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     step_lines = _extract_step_lines(doc, msp)
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
+    slab_zones = _extract_slab_zones(doc, msp)
     slab_level = _extract_slab_level(doc, msp)
 
     return FloorData(
@@ -810,5 +879,6 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         step_lines=step_lines,
         column_lines=column_lines,
         dim_lines=dim_lines,
+        slab_zones=slab_zones,
         slab_level=slab_level,
     )

@@ -53,6 +53,14 @@ class ColumnLine:
 
 
 @dataclass
+class SlabZone:
+    x: float
+    y: float
+    fl_text: str  # e.g. "FL+40", "FL-360"
+    fl_value: int  # numeric mm value, e.g. +40, -360
+
+
+@dataclass
 class FloorData:
     sleeves: list[Sleeve] = field(default_factory=list)
     grid_lines: list[GridLine] = field(default_factory=list)
@@ -60,6 +68,7 @@ class FloorData:
     wall_lines: list[WallLine] = field(default_factory=list)
     step_lines: list[StepLine] = field(default_factory=list)
     column_lines: list[ColumnLine] = field(default_factory=list)
+    slab_zones: list[SlabZone] = field(default_factory=list)
     slab_level: str | None = None
 
 

@@ -1,5 +1,5 @@
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
-import type { FloorData, Sleeve, CheckResult } from "../types";
+import type { FloorData, Sleeve, CheckResult, SlabZone } from "../types";
 
 interface Props {
   floorData: FloorData;
@@ -8,7 +8,7 @@ interface Props {
   onSleeveHover: (sleeve: Sleeve | null) => void;
   onSleeveClick: (sleeve: Sleeve | null) => void;
   selectedSleeveId: string | null;
-  layers: { grid: boolean; wall: boolean; step: boolean; sleeve: boolean; lowerWall: boolean };
+  layers: { grid: boolean; wall: boolean; step: boolean; sleeve: boolean; lowerWall: boolean; heatmap: boolean };
   colorMode: "severity" | "fl" | "discipline";
 }
 
@@ -34,6 +34,49 @@ const DISC_COLORS: Record<string, string> = {
   "電気": "#ef4444",
   "建築": "#6b7280",
 };
+
+/** Map FL value (mm) to a heatmap color: red=high, green=0, blue=low */
+function flValueToColor(val: number): string {
+  // Clamp to range [-1500, +200]
+  const clamped = Math.max(-1500, Math.min(200, val));
+  // Normalize to [0,1] where 0=lowest, 1=highest
+  const t = (clamped + 1500) / 1700;
+
+  // Color stops: purple(-1500) -> blue(-700) -> cyan(-300) -> green(0) -> yellow(+50) -> orange(+100) -> red(+200)
+  let r: number, g: number, b: number;
+  if (t < 0.25) {
+    // purple to blue
+    const s = t / 0.25;
+    r = Math.round(128 * (1 - s));
+    g = 0;
+    b = Math.round(180 + 75 * s);
+  } else if (t < 0.5) {
+    // blue to cyan
+    const s = (t - 0.25) / 0.25;
+    r = 0;
+    g = Math.round(200 * s);
+    b = 255;
+  } else if (t < 0.7) {
+    // cyan to green
+    const s = (t - 0.5) / 0.2;
+    r = 0;
+    g = Math.round(200 + 55 * s);
+    b = Math.round(255 * (1 - s));
+  } else if (t < 0.85) {
+    // green to yellow
+    const s = (t - 0.7) / 0.15;
+    r = Math.round(255 * s);
+    g = 255;
+    b = 0;
+  } else {
+    // yellow to red
+    const s = (t - 0.85) / 0.15;
+    r = 255;
+    g = Math.round(255 * (1 - s));
+    b = 0;
+  }
+  return `rgb(${r},${g},${b})`;
+}
 
 const INITIAL_VB = { x: -5000, y: -40000, w: 90000, h: 45000 };
 const ZOOM_FACTOR = 1.04;
@@ -125,6 +168,44 @@ export default function DrawingView({
     setVb(INITIAL_VB);
   }, []);
 
+  // Pre-compute heatmap cells (Voronoi-style nearest-zone assignment)
+  const heatmapCells = useMemo(() => {
+    const zones = floorData.slab_zones;
+    if (!zones || zones.length === 0) return [];
+
+    const allX = zones.map(z => z.x);
+    const allY = zones.map(z => z.y);
+    const minX = Math.min(...allX) - 3000;
+    const maxX = Math.max(...allX) + 3000;
+    const minY = Math.min(...allY) - 3000;
+    const maxY = Math.max(...allY) + 3000;
+
+    const CELL = 800;
+    const cols = Math.ceil((maxX - minX) / CELL);
+    const rows = Math.ceil((maxY - minY) / CELL);
+
+    const cells: { x: number; y: number; color: string }[] = [];
+    for (let row = 0; row < rows; row++) {
+      const cy = minY + row * CELL + CELL / 2;
+      for (let col = 0; col < cols; col++) {
+        const cx = minX + col * CELL + CELL / 2;
+        let bestDist = Infinity;
+        let bestVal = 0;
+        for (const z of zones) {
+          const dx = cx - z.x;
+          const dy = cy - z.y;
+          const d = dx * dx + dy * dy;
+          if (d < bestDist) {
+            bestDist = d;
+            bestVal = z.fl_value;
+          }
+        }
+        cells.push({ x: minX + col * CELL, y: minY + row * CELL, color: flValueToColor(bestVal) });
+      }
+    }
+    return cells;
+  }, [floorData.slab_zones]);
+
   const severityMap = useMemo(() => {
     const map = new Map<string, "NG" | "WARNING" | "OK">();
     for (const r of results) {
@@ -165,6 +246,16 @@ export default function DrawingView({
       onDoubleClick={handleDoubleClick}
     >
       <g transform="scale(1,-1)">
+        {/* Slab level heatmap — Voronoi-style nearest-zone coloring */}
+        {layers.heatmap && heatmapCells.length > 0 && (
+          <g opacity={0.30}>
+            {heatmapCells.map((c, i) => (
+              <rect key={`hc${i}`} x={c.x} y={c.y} width={800} height={800}
+                fill={c.color} stroke="none" />
+            ))}
+          </g>
+        )}
+
         {/* Grid lines */}
         {layers.grid && floorData.grid_lines.map((g, i) =>
           g.direction === "H" ? (
@@ -219,6 +310,31 @@ export default function DrawingView({
           );
         })}
       </g>
+      {/* Heatmap legend (screen-space overlay) */}
+      {layers.heatmap && floorData.slab_zones && floorData.slab_zones.length > 0 && (() => {
+        const vals = [...new Set(floorData.slab_zones.map(z => z.fl_value))].sort((a, b) => b - a);
+        const min = Math.min(...vals);
+        const max = Math.max(...vals);
+        const steps = 8;
+        const legendItems: { val: number; color: string }[] = [];
+        for (let i = 0; i < steps; i++) {
+          const v = max - (max - min) * i / (steps - 1);
+          legendItems.push({ val: Math.round(v), color: flValueToColor(v) });
+        }
+        return (
+          <foreignObject x={vb.x + vb.w * 0.01} y={vb.y + vb.h * 0.02} width={vb.w * 0.12} height={vb.h * 0.4}>
+            <div style={{ background: "rgba(255,255,255,0.9)", borderRadius: 6, padding: "6px 8px", fontSize: vb.w * 0.0015, border: "1px solid #e5e7eb" }}>
+              <div style={{ fontWeight: 600, marginBottom: 4, color: "#374151" }}>FLレベル</div>
+              {legendItems.map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
+                  <div style={{ width: vb.w * 0.006, height: vb.w * 0.003, borderRadius: 2, background: item.color, opacity: 0.7 }} />
+                  <span style={{ color: "#6b7280" }}>{item.val >= 0 ? `+${item.val}` : item.val}mm</span>
+                </div>
+              ))}
+            </div>
+          </foreignObject>
+        );
+      })()}
     </svg>
   );
 }

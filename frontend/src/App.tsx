@@ -28,7 +28,7 @@ function App() {
   const [selectedSleeve, setSelectedSleeve] = useState<Sleeve | null>(null);
   const [filter, setFilter] = useState<"all" | "NG" | "WARNING" | "OK">("all");
   const [layers, setLayers] = useState({
-    grid: true, wall: true, step: true, sleeve: true, lowerWall: false,
+    grid: true, wall: true, step: true, sleeve: true, lowerWall: false, heatmap: false,
   });
 
   const toggleLayer = (key: keyof typeof layers) =>
@@ -176,6 +176,7 @@ function App() {
               ["grid", "通り芯"],
               ["wall", "壁"],
               ["step", "段差線"],
+              ["heatmap", "高低差"],
               ["sleeve", "スリーブ"],
               ...(activeFloor.id === "2f" ? [["lowerWall", "1F壁"]] : []),
             ] as string[][]).map(([key, label]) => {
