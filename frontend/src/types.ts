@@ -46,7 +46,15 @@ export interface SlabZone {
   x: number;
   y: number;
   fl_text: string;
-  fl_value: number;  // mm offset from FL, e.g. +40, -360
+  fl_value: number;
+}
+
+export interface SlabLabel {
+  x: number;
+  y: number;
+  slab_no: string;      // "S16", "DS16"
+  level: string;        // "-60" or "-545～-600"
+  thickness: string;    // "165"
 }
 
 export interface SlabOutline {
@@ -63,6 +71,7 @@ export interface FloorData {
   dim_lines: DimLine[];
   slab_zones: SlabZone[];
   slab_outlines: SlabOutline[];
+  slab_labels: SlabLabel[];
   slab_level: string | null;
 }
 

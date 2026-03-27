@@ -19,6 +19,7 @@ from .models import (
     DimLine,
     FloorData,
     GridLine,
+    SlabLabel,
     SlabOutline,
     SlabZone,
     Sleeve,
@@ -798,6 +799,77 @@ def _extract_slab_zones(doc, msp) -> list[SlabZone]:
 
 
 # ---------------------------------------------------------------------------
+# Slab label block extraction (S15, S16 etc. with level/thickness)
+# ---------------------------------------------------------------------------
+
+def _extract_slab_labels(doc, msp) -> list[SlabLabel]:
+    """
+    Extract slab info from INSERT blocks on F308_スラブ layers.
+    Each block contains texts: slab number (S15), level (-60 or -545～-600),
+    representative level ((-60)), thickness (165), (thickness).
+    """
+    layers = set(_find_layers_any(doc, ["F308_スラブ", "スラブラベル"]))
+    labels: list[SlabLabel] = []
+
+    for ins in msp:
+        if ins.dxftype() != "INSERT" or ins.dxf.layer not in layers:
+            continue
+        x, y = ins.dxf.insert.x, ins.dxf.insert.y
+        if not _in_building_range(x, y):
+            continue
+
+        block = doc.blocks.get(ins.dxf.name)
+        if block is None:
+            continue
+
+        texts = [
+            be.dxf.text.strip()
+            for be in block
+            if be.dxftype() == "TEXT" and be.dxf.text.strip() not in ("t", "h")
+        ]
+
+        slab_no = ""
+        level = ""
+        thickness = ""
+        paren_values: list[str] = []
+
+        for t in texts:
+            if re.match(r"^D?S\d+", t):
+                slab_no = t
+            elif "\uff5e" in t or "～" in t or "~" in t:
+                level = t
+            elif re.match(r"^\(-?\+?\d+\)$", t):
+                paren_values.append(re.search(r"-?\+?\d+", t).group())  # type: ignore[union-attr]
+            elif re.match(r"^[+\-]?\d+$", t) and not slab_no:
+                pass  # skip stray numbers before slab_no
+            elif re.match(r"^[+\-]?\d+$", t) and not level:
+                level = t
+
+        # paren_values: first is level repr, second is thickness
+        if len(paren_values) >= 2:
+            if not level:
+                level = paren_values[0]
+            thickness = str(abs(int(paren_values[1])))
+        elif len(paren_values) == 1:
+            if not level:
+                level = paren_values[0]
+
+        # Try to get thickness from non-paren number after slab_no
+        if not thickness:
+            for t in texts:
+                if re.match(r"^\d+$", t):
+                    val = int(t)
+                    if 50 <= val <= 500:
+                        thickness = t
+                        break
+
+        if slab_no:
+            labels.append(SlabLabel(x=x, y=y, slab_no=slab_no, level=level, thickness=thickness))
+
+    return labels
+
+
+# ---------------------------------------------------------------------------
 # Step level label extraction (段差記号テキスト)
 # ---------------------------------------------------------------------------
 
@@ -943,6 +1015,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     slab_zones = _extract_slab_zones(doc, msp)
     slab_zones.extend(_extract_step_labels(doc, msp))
     slab_outlines = _extract_slab_outlines(doc, msp)
+    slab_labels = _extract_slab_labels(doc, msp)
     slab_level = _extract_slab_level(doc, msp)
 
     return FloorData(
@@ -954,5 +1027,6 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         dim_lines=dim_lines,
         slab_zones=slab_zones,
         slab_outlines=slab_outlines,
+        slab_labels=slab_labels,
         slab_level=slab_level,
     )

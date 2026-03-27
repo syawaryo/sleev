@@ -61,6 +61,15 @@ class SlabZone:
 
 
 @dataclass
+class SlabLabel:
+    x: float
+    y: float
+    slab_no: str       # "S16", "DS16"
+    level: str         # "-60" or "-545～-600"
+    thickness: str     # "165"
+
+
+@dataclass
 class SlabOutline:
     start: tuple[float, float]
     end: tuple[float, float]
@@ -76,6 +85,7 @@ class FloorData:
     column_lines: list[ColumnLine] = field(default_factory=list)
     slab_zones: list[SlabZone] = field(default_factory=list)
     slab_outlines: list[SlabOutline] = field(default_factory=list)
+    slab_labels: list[SlabLabel] = field(default_factory=list)
     slab_level: str | None = None
 
 

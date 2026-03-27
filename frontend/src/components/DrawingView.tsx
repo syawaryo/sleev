@@ -176,18 +176,30 @@ export default function DrawingView({
             stroke="#4338ca" strokeWidth={18} opacity={0.5} />
         ))}
 
-        {/* Slab level labels */}
+        {/* Slab info labels (S16 / FL-60 / t=165) */}
+        {layers.slabLevel && floorData.slab_labels?.map((sl, i) => (
+          <g key={`slab${i}`} transform={`translate(${sl.x},${sl.y})`}>
+            <g transform="scale(1,-1)">
+              <text x={0} y={-120} fontSize={200} fill="#4338ca" fontWeight={700} textAnchor="middle" opacity={0.8}>
+                {sl.slab_no}
+              </text>
+              <text x={0} y={100} fontSize={150} fill="#6366f1" fontWeight={500} textAnchor="middle" opacity={0.7}>
+                FL{sl.level}
+              </text>
+              {sl.thickness && (
+                <text x={0} y={300} fontSize={130} fill="#818cf8" fontWeight={400} textAnchor="middle" opacity={0.6}>
+                  t={sl.thickness}
+                </text>
+              )}
+            </g>
+          </g>
+        ))}
+
+        {/* Step level labels (FL-60, FL±0 next to step lines) */}
         {layers.slabLevel && floorData.slab_zones?.map((z, i) => (
           <g key={`sl${i}`} transform={`translate(${z.x},${z.y})`}>
             <g transform="scale(1,-1)">
-              <text
-                x={0} y={0}
-                fontSize={180}
-                fill="#6366f1"
-                fontWeight={600}
-                textAnchor="middle"
-                opacity={0.7}
-              >
+              <text x={0} y={0} fontSize={160} fill="#d97706" fontWeight={600} textAnchor="middle" opacity={0.7}>
                 FL{z.fl_value >= 0 ? "+" : ""}{z.fl_value}
               </text>
             </g>
