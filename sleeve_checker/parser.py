@@ -823,6 +823,30 @@ def _extract_pn_labels(doc, msp) -> list[PnLabel]:
 
 
 # ---------------------------------------------------------------------------
+# P-N to sleeve nearest-match assignment
+# ---------------------------------------------------------------------------
+
+def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel]) -> None:
+    """Assign each P-N label to its nearest sleeve (simple nearest-neighbour)."""
+    if not pn_labels or not sleeves:
+        return
+    used_sleeves: set[str] = set()
+    for pn in sorted(pn_labels, key=lambda p: p.number):
+        best_dist = float("inf")
+        best_sleeve: Sleeve | None = None
+        for s in sleeves:
+            if s.id in used_sleeves:
+                continue
+            dist = math.hypot(s.center[0] - pn.x, s.center[1] - pn.y)
+            if dist < best_dist:
+                best_dist = dist
+                best_sleeve = s
+        if best_sleeve is not None:
+            best_sleeve.pn_number = pn.text
+            used_sleeves.add(best_sleeve.id)
+
+
+# ---------------------------------------------------------------------------
 # Slab label block extraction (S15, S16 etc. with level/thickness)
 # ---------------------------------------------------------------------------
 
@@ -1037,6 +1061,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
     pn_labels = _extract_pn_labels(doc, msp)
+    _attach_pn_numbers(sleeves, pn_labels)
     slab_zones = _extract_slab_zones(doc, msp)
     slab_zones.extend(_extract_step_labels(doc, msp))
     slab_outlines = _extract_slab_outlines(doc, msp)
