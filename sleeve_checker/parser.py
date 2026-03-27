@@ -798,6 +798,49 @@ def _extract_slab_zones(doc, msp) -> list[SlabZone]:
 
 
 # ---------------------------------------------------------------------------
+# Step level label extraction (段差記号テキスト)
+# ---------------------------------------------------------------------------
+
+def _extract_step_labels(doc, msp) -> list[SlabZone]:
+    """
+    Extract FL texts from step symbol layers (段差記号).
+    These are labels like 'FL-60', 'FL±0' placed next to step lines
+    indicating the level on each side of the step.
+    """
+    layers = set(_find_layers_any(doc, ["段差記号"]))
+    fl_pattern = re.compile(r"FL\s*([±+\-])\s*(\d+)", re.IGNORECASE)
+    labels: list[SlabZone] = []
+
+    for entity in msp:
+        if entity.dxf.layer not in layers:
+            continue
+        if entity.dxftype() != "TEXT":
+            continue
+        try:
+            raw = (entity.dxf.text or "").strip()
+            pos = entity.dxf.insert
+            x, y = float(pos.x), float(pos.y)
+            if not _in_building_range(x, y):
+                continue
+
+            match = fl_pattern.search(raw)
+            if match:
+                sign_char = match.group(1)
+                num = int(match.group(2))
+                if sign_char == "±":
+                    val = 0
+                elif sign_char == "+":
+                    val = num
+                else:
+                    val = -num
+                fl_text = f"FL{'+' if val > 0 else '±' if val == 0 else ''}{val if val != 0 else '0'}"
+                labels.append(SlabZone(x=x, y=y, fl_text=fl_text, fl_value=val))
+        except Exception:
+            continue
+    return labels
+
+
+# ---------------------------------------------------------------------------
 # Slab outline extraction (RC立上り線 = slab edge lines)
 # ---------------------------------------------------------------------------
 
@@ -898,6 +941,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
     slab_zones = _extract_slab_zones(doc, msp)
+    slab_zones.extend(_extract_step_labels(doc, msp))
     slab_outlines = _extract_slab_outlines(doc, msp)
     slab_level = _extract_slab_level(doc, msp)
 
