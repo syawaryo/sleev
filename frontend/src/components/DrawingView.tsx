@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useCallback } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import type { FloorData, Sleeve, CheckResult } from "../types";
 
 interface Props {
@@ -59,36 +59,42 @@ export default function DrawingView({
     return { x: vb.x + sx * vb.w, y: vb.y + sy * vb.h };
   }, [vb]);
 
-  // Wheel zoom (pinch on trackpad)
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
+  // Wheel zoom — must use native listener with { passive: false } to prevent page scroll
+  const vbRef = useRef(vb);
+  vbRef.current = vb;
+
+  useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
 
-    // Get cursor position in SVG space
-    const pt = screenToSvg(e.clientX, e.clientY);
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    let factor: number;
-    if (e.ctrlKey) {
-      // Pinch zoom (trackpad)
-      factor = e.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
-    } else {
-      // Scroll wheel
-      factor = e.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
-    }
+      const rect = svg.getBoundingClientRect();
+      const cur = vbRef.current;
+      const sx = (e.clientX - rect.left) / rect.width;
+      const sy = (e.clientY - rect.top) / rect.height;
+      const ptX = cur.x + sx * cur.w;
+      const ptY = cur.y + sy * cur.h;
 
-    setVb((prev) => {
-      const newW = Math.min(Math.max(prev.w * factor, MIN_ZOOM_W), MAX_ZOOM_W);
-      const newH = Math.min(Math.max(prev.h * factor, MIN_ZOOM_W * 0.5), MAX_ZOOM_W * 0.5);
-      const ratio = newW / prev.w;
-      return {
-        x: pt.x - (pt.x - prev.x) * ratio,
-        y: pt.y - (pt.y - prev.y) * ratio,
+      const factor = e.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+
+      const newW = Math.min(Math.max(cur.w * factor, MIN_ZOOM_W), MAX_ZOOM_W);
+      const newH = Math.min(Math.max(cur.h * factor, MIN_ZOOM_W * 0.5), MAX_ZOOM_W * 0.5);
+      const ratio = newW / cur.w;
+
+      setVb({
+        x: ptX - (ptX - cur.x) * ratio,
+        y: ptY - (ptY - cur.y) * ratio,
         w: newW,
         h: newH,
-      };
-    });
-  }, [screenToSvg]);
+      });
+    };
+
+    svg.addEventListener("wheel", handler, { passive: false });
+    return () => svg.removeEventListener("wheel", handler);
+  }, []);
 
   // Pan (mouse drag)
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -152,7 +158,6 @@ export default function DrawingView({
       viewBox={viewBox}
       style={{ width: "100%", height: "100%", background: "#fdfdfe", cursor: isPanning ? "grabbing" : "grab" }}
       xmlns="http://www.w3.org/2000/svg"
-      onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
