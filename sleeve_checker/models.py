@@ -61,6 +61,12 @@ class SlabZone:
 
 
 @dataclass
+class SlabOutline:
+    start: tuple[float, float]
+    end: tuple[float, float]
+
+
+@dataclass
 class FloorData:
     sleeves: list[Sleeve] = field(default_factory=list)
     grid_lines: list[GridLine] = field(default_factory=list)
@@ -69,6 +75,7 @@ class FloorData:
     step_lines: list[StepLine] = field(default_factory=list)
     column_lines: list[ColumnLine] = field(default_factory=list)
     slab_zones: list[SlabZone] = field(default_factory=list)
+    slab_outlines: list[SlabOutline] = field(default_factory=list)
     slab_level: str | None = None
 
 

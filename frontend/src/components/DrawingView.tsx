@@ -167,7 +167,13 @@ export default function DrawingView({
         {/* Step lines */}
         {layers.step && floorData.step_lines.map((s, i) => (
           <line key={`s${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
-            stroke="#d97706" strokeWidth={20} opacity={0.6} />
+            stroke="#d97706" strokeWidth={25} opacity={0.8} />
+        ))}
+
+        {/* Slab outlines (RC立上り線) */}
+        {layers.slabLevel && floorData.slab_outlines?.map((s, i) => (
+          <line key={`so${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
+            stroke="#4338ca" strokeWidth={18} opacity={0.5} />
         ))}
 
         {/* Slab level labels */}

@@ -49,6 +49,11 @@ export interface SlabZone {
   fl_value: number;  // mm offset from FL, e.g. +40, -360
 }
 
+export interface SlabOutline {
+  start: [number, number];
+  end: [number, number];
+}
+
 export interface FloorData {
   sleeves: Sleeve[];
   grid_lines: GridLine[];
@@ -57,6 +62,7 @@ export interface FloorData {
   column_lines: ColumnLine[];
   dim_lines: DimLine[];
   slab_zones: SlabZone[];
+  slab_outlines: SlabOutline[];
   slab_level: string | null;
 }
 

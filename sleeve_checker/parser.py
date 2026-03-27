@@ -19,6 +19,7 @@ from .models import (
     DimLine,
     FloorData,
     GridLine,
+    SlabOutline,
     SlabZone,
     Sleeve,
     StepLine,
@@ -580,7 +581,7 @@ def _extract_dim_lines(doc, msp) -> list[DimLine]:
 # Text → Sleeve label association
 # ---------------------------------------------------------------------------
 
-def _attach_label_texts(sleeves: list[Sleeve], doc, msp) -> None:
+def _attach_label_texts(sleeves: list[Sleeve], doc, msp, step_lines: list[StepLine] | None = None) -> None:
     """
     Associate TEXT entities near each sleeve with ``label_text`` and ``fl_text``.
 
@@ -665,14 +666,18 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp) -> None:
             # Found FL on the sleeve's own layer — use as-is
             sleeve.fl_text = best_fl_txt
         elif fl_zones:
-            # Fallback: find the nearest slab FL zone point (no radius limit)
+            # Fallback: find the nearest slab FL zone point that is NOT
+            # blocked by a step line (段差線 acts as a barrier).
+            from .geometry import ray_blocked_by_steps
+            step_segs = [(s.start, s.end) for s in step_lines]
             best_zone_dist = float("inf")
             best_zone_fl: str | None = None
             for zx, zy, fl_val in fl_zones:
                 dist = math.hypot(zx - cx, zy - cy)
                 if dist < best_zone_dist:
-                    best_zone_dist = dist
-                    best_zone_fl = fl_val
+                    if not ray_blocked_by_steps((cx, cy), (zx, zy), step_segs):
+                        best_zone_dist = dist
+                        best_zone_fl = fl_val
             if best_zone_fl is not None:
                 sleeve.fl_text = best_zone_fl
 
@@ -793,6 +798,28 @@ def _extract_slab_zones(doc, msp) -> list[SlabZone]:
 
 
 # ---------------------------------------------------------------------------
+# Slab outline extraction (RC立上り線 = slab edge lines)
+# ---------------------------------------------------------------------------
+
+def _extract_slab_outlines(doc, msp) -> list[SlabOutline]:
+    """
+    Extract slab outline lines from F108_2_RC立上り線 layer.
+    These show where the slab edges / step-ups are.
+    """
+    layers = _find_layers_any(doc, ["F108_2_RC立上り", "F108_RC見え掛り"])
+    outlines: list[SlabOutline] = []
+    for entity in msp:
+        if entity.dxf.layer not in set(layers):
+            continue
+        if entity.dxftype() == "LINE":
+            sx, sy = entity.dxf.start.x, entity.dxf.start.y
+            ex, ey = entity.dxf.end.x, entity.dxf.end.y
+            if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
+                outlines.append(SlabOutline(start=(sx, sy), end=(ex, ey)))
+    return outlines
+
+
+# ---------------------------------------------------------------------------
 # Slab level extraction
 # ---------------------------------------------------------------------------
 
@@ -862,14 +889,16 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     msp = doc.modelspace()
 
     sleeves = _extract_sleeves(doc, msp)
-    _attach_label_texts(sleeves, doc, msp)
 
     grid_lines = _extract_grid_lines(doc, msp)
     wall_lines = _extract_wall_lines(doc, msp)
     step_lines = _extract_step_lines(doc, msp)
+
+    _attach_label_texts(sleeves, doc, msp, step_lines=step_lines)
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
     slab_zones = _extract_slab_zones(doc, msp)
+    slab_outlines = _extract_slab_outlines(doc, msp)
     slab_level = _extract_slab_level(doc, msp)
 
     return FloorData(
@@ -880,5 +909,6 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         column_lines=column_lines,
         dim_lines=dim_lines,
         slab_zones=slab_zones,
+        slab_outlines=slab_outlines,
         slab_level=slab_level,
     )
