@@ -173,21 +173,24 @@ function App() {
             <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
             <span style={{ color: "#9ca3af", fontSize: 10 }}>レイヤー</span>
             {([
-              ["grid", "通り芯", "#3b82f6", "#eff6ff", "#93c5fd"],
-              ["wall", "壁", "#6b7280", "#fff", "#d1d5db"],
-              ["step", "段差線", "#b45309", "#fffbeb", "#fbbf24"],
-              ["sleeve", "スリーブ", "#16a34a", "#f0fdf4", "#86efac"],
-              ...(activeFloor.id === "2f" ? [["lowerWall", "1F壁", "#9ca3af", "#fff", "#d1d5db"]] : []),
-            ] as string[][]).map(([key, label, color, bg, border]) => (
-              <button key={key}
-                onClick={() => toggleLayer(key as keyof typeof layers)}
-                style={{
-                  padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
-                  border: `1px solid ${layers[key as keyof typeof layers] ? border : "#e5e7eb"}`,
-                  background: layers[key as keyof typeof layers] ? bg : "#fff",
-                  color: layers[key as keyof typeof layers] ? color : "#d1d5db",
-                }}>{label}</button>
-            ))}
+              ["grid", "通り芯"],
+              ["wall", "壁"],
+              ["step", "段差線"],
+              ["sleeve", "スリーブ"],
+              ...(activeFloor.id === "2f" ? [["lowerWall", "1F壁"]] : []),
+            ] as string[][]).map(([key, label]) => {
+              const on = layers[key as keyof typeof layers];
+              return (
+                <button key={key}
+                  onClick={() => toggleLayer(key as keyof typeof layers)}
+                  style={{
+                    padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
+                    border: `1px solid ${on ? "#9ca3af" : "#e5e7eb"}`,
+                    background: on ? "#f3f4f6" : "#fff",
+                    color: on ? "#374151" : "#d1d5db",
+                  }}>{label}</button>
+              );
+            })}
 
             <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
             <span style={{ color: "#9ca3af", fontSize: 10 }}>色分け</span>
