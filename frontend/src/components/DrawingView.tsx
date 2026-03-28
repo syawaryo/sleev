@@ -8,7 +8,7 @@ interface Props {
   onSleeveHover: (sleeve: Sleeve | null) => void;
   onSleeveClick: (sleeve: Sleeve | null) => void;
   selectedSleeveId: string | null;
-  layers: { grid: boolean; wall: boolean; step: boolean; sleeve: boolean; lowerWall: boolean; slabLevel: boolean };
+  layers: { grid: boolean; wall: boolean; step: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean };
   colorMode: "severity" | "fl" | "discipline";
 }
 
@@ -169,6 +169,60 @@ export default function DrawingView({
           <line key={`s${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
             stroke="#d97706" strokeWidth={25} opacity={0.8} />
         ))}
+
+        {/* Dimension lines: defpoint2 → defpoint3 = measured span */}
+        {layers.dim && floorData.dim_lines.map((d, i) => {
+          const val = Math.round(d.measurement);
+          if (val < 1) return null;
+
+          // defpoint2 = 1st ext line origin, defpoint3 = 2nd ext line origin
+          // defpoint1 = dimension line position (offset from measurement points)
+          const x1 = d.defpoint2[0], y1 = d.defpoint2[1];
+          const x2 = d.defpoint3[0], y2 = d.defpoint3[1];
+
+          // Dimension line runs parallel to defpoint2→defpoint3 but at defpoint1's offset
+          const dx = Math.abs(x2 - x1);
+          const dy = Math.abs(y2 - y1);
+          const isHorizontal = dx >= dy;
+
+          // Dimension line endpoints (projected to defpoint1 offset)
+          let dlx1: number, dly1: number, dlx2: number, dly2: number;
+          if (isHorizontal) {
+            dly1 = d.defpoint1[1]; dly2 = d.defpoint1[1];
+            dlx1 = x1; dlx2 = x2;
+          } else {
+            dlx1 = d.defpoint1[0]; dlx2 = d.defpoint1[0];
+            dly1 = y1; dly2 = y2;
+          }
+
+          const mx = (dlx1 + dlx2) / 2;
+          const my = (dly1 + dly2) / 2;
+
+          return (
+            <g key={`dm${i}`}>
+              {/* Extension lines from measurement points to dimension line */}
+              <line x1={x1} y1={y1} x2={dlx1} y2={dly1}
+                    stroke="#06b6d4" strokeWidth={5} opacity={0.3} />
+              <line x1={x2} y1={y2} x2={dlx2} y2={dly2}
+                    stroke="#06b6d4" strokeWidth={5} opacity={0.3} />
+              {/* Dimension line */}
+              <line x1={dlx1} y1={dly1} x2={dlx2} y2={dly2}
+                    stroke="#06b6d4" strokeWidth={10} opacity={0.5} />
+              {/* Tick marks */}
+              <circle cx={dlx1} cy={dly1} r={20} fill="#06b6d4" opacity={0.5} />
+              <circle cx={dlx2} cy={dly2} r={20} fill="#06b6d4" opacity={0.5} />
+              {/* Measurement text */}
+              <g transform={`translate(${mx},${my})`}>
+                <g transform="scale(1,-1)">
+                  <text x={0} y={0} fontSize={120} fill="#06b6d4" fontWeight={600}
+                    textAnchor="middle" opacity={0.7}>
+                    {val}
+                  </text>
+                </g>
+              </g>
+            </g>
+          );
+        })}
 
         {/* Slab outlines (RC立上り線) */}
         {layers.slabLevel && floorData.slab_outlines?.map((s, i) => (

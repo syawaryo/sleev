@@ -37,8 +37,9 @@ export interface ColumnLine {
 export interface DimLine {
   layer: string;
   measurement: number;
-  defpoint1: [number, number];
-  defpoint2: [number, number];
+  defpoint1: [number, number];  // dimension line position
+  defpoint2: [number, number];  // 1st extension line origin
+  defpoint3: [number, number];  // 2nd extension line origin
   text_override: string | null;
 }
 

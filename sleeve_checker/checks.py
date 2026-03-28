@@ -413,85 +413,149 @@ def check_dim_sum(
     grids: list[GridLine],
 ) -> list[CheckResult]:
     """
-    Check #4: For each pair of adjacent grid lines, the sum of all dimension
-    measurements between them should equal the span (±1 mm).
+    Check #4: Detect continuous dimension chains and verify their sum
+    equals the grid-to-grid span.
 
-    For V (vertical) grid lines (constant X positions), horizontal dims
-    (defpoints with similar Y spread relative to X positions) are checked.
-    For H (horizontal) grid lines (constant Y positions), vertical dims are used.
+    Algorithm:
+    1. Classify dims as horizontal or vertical by comparing defpoint2/3 spread.
+    2. Group by dimension line position (defpoint1 Y for horiz, X for vert).
+    3. Within each group, find continuous chains (endpoint gap < 50mm).
+    4. If chain endpoints are near grid lines (< 200mm), compare
+       chain sum vs grid span.
     """
     results: list[CheckResult] = []
 
     v_grids = sorted([g for g in grids if g.direction == "V"], key=lambda g: g.position)
     h_grids = sorted([g for g in grids if g.direction == "H"], key=lambda g: g.position)
 
-    TOLERANCE = 1.0  # mm
+    CHAIN_GAP = 50.0      # max gap between adjacent dims in a chain
+    GRID_SNAP = 200.0     # max distance from chain end to grid line
+    SUM_TOLERANCE = 5.0   # mm
+    GROUP_BIN = 50.0      # bin size for grouping dim line positions
 
-    def _check_span(
-        grid_a: GridLine,
-        grid_b: GridLine,
-        span_dims: list[DimLine],
+    def _find_nearest_grid(
+        pos: float, grid_list: list[GridLine]
+    ) -> tuple[GridLine | None, float]:
+        if not grid_list:
+            return None, float("inf")
+        best = min(grid_list, key=lambda g: abs(g.position - pos))
+        return best, abs(best.position - pos)
+
+    def _detect_chains(
+        dim_group: list[DimLine],
+        get_start: callable,
+        get_end: callable,
+        grid_list: list[GridLine],
         axis: str,
     ) -> None:
-        """Check if dims sum to span for a given grid pair."""
-        if not span_dims:
+        if len(dim_group) < 2:
             return
 
-        span = abs(grid_b.position - grid_a.position)
-        total = sum(d.measurement for d in span_dims)
+        dim_group.sort(key=lambda d: get_start(d))
 
-        if abs(total - span) <= TOLERANCE:
-            results.append(CheckResult(
-                check_id=4,
-                check_name="寸法合計",
-                severity="OK",
-                sleeve=None,
-                message=(
-                    f"グリッド {grid_a.axis_label}–{grid_b.axis_label} ({axis}軸): "
-                    f"合計 {total:.1f} = スパン {span:.1f} mm"
-                ),
-                related_coords=[],
-            ))
-        else:
-            results.append(CheckResult(
-                check_id=4,
-                check_name="寸法合計",
-                severity="NG",
-                sleeve=None,
-                message=(
-                    f"グリッド {grid_a.axis_label}–{grid_b.axis_label} ({axis}軸): "
-                    f"合計 {total:.1f} mm ≠ スパン {span:.1f} mm "
-                    f"（差 {total - span:+.1f} mm）"
-                ),
-                related_coords=[],
-            ))
+        # Build continuous chains
+        chains: list[list[DimLine]] = []
+        chain: list[DimLine] = [dim_group[0]]
 
-    # --- V grid pairs: look for dims whose defpoints straddle the two X positions ---
-    for i in range(len(v_grids) - 1):
-        ga, gb = v_grids[i], v_grids[i + 1]
-        lo, hi = ga.position, gb.position
+        for i in range(1, len(dim_group)):
+            prev_end = get_end(chain[-1])
+            curr_start = get_start(dim_group[i])
+            if abs(curr_start - prev_end) < CHAIN_GAP:
+                chain.append(dim_group[i])
+            else:
+                if len(chain) >= 2:
+                    chains.append(chain)
+                chain = [dim_group[i]]
 
-        span_dims = [
-            d for d in dims
-            if lo - TOLERANCE <= d.defpoint1[0] <= hi + TOLERANCE
-            and lo - TOLERANCE <= d.defpoint2[0] <= hi + TOLERANCE
-            # Horizontal dim: both points at similar Y → check X spread
-            and abs(d.defpoint1[1] - d.defpoint2[1]) < abs(d.defpoint1[0] - d.defpoint2[0]) + TOLERANCE
-        ]
-        _check_span(ga, gb, span_dims, "X")
+        if len(chain) >= 2:
+            chains.append(chain)
 
-    # --- H grid pairs: look for dims whose defpoints straddle the two Y positions ---
-    for i in range(len(h_grids) - 1):
-        ga, gb = h_grids[i], h_grids[i + 1]
-        lo, hi = ga.position, gb.position
+        # Check each chain against grid span
+        for ch in chains:
+            chain_start = get_start(ch[0])
+            chain_end = get_end(ch[-1])
+            chain_sum = sum(d.measurement for d in ch)
 
-        span_dims = [
-            d for d in dims
-            if lo - TOLERANCE <= d.defpoint1[1] <= hi + TOLERANCE
-            and lo - TOLERANCE <= d.defpoint2[1] <= hi + TOLERANCE
-            and abs(d.defpoint2[1] - d.defpoint1[1]) > abs(d.defpoint2[0] - d.defpoint1[0]) - TOLERANCE
-        ]
-        _check_span(ga, gb, span_dims, "Y")
+            g_start, d_start = _find_nearest_grid(chain_start, grid_list)
+            g_end, d_end = _find_nearest_grid(chain_end, grid_list)
+
+            if (g_start is None or g_end is None
+                    or g_start.axis_label == g_end.axis_label):
+                continue
+
+            grid_span = abs(g_end.position - g_start.position)
+
+            # Only check chains that reasonably span between grids
+            if d_start > GRID_SNAP or d_end > GRID_SNAP:
+                continue
+
+            coords = [(chain_start, ch[0].defpoint1[1 if axis == "X" else 0]),
+                       (chain_end, ch[-1].defpoint1[1 if axis == "X" else 0])]
+
+            if abs(chain_sum - grid_span) <= SUM_TOLERANCE:
+                results.append(CheckResult(
+                    check_id=4,
+                    check_name="寸法合計",
+                    severity="OK",
+                    sleeve=None,
+                    message=(
+                        f"通り芯 {g_start.axis_label}–{g_end.axis_label} ({axis}): "
+                        f"{len(ch)}本の寸法合計 {chain_sum:.0f} = "
+                        f"通り芯間 {grid_span:.0f}mm"
+                    ),
+                    related_coords=coords,
+                ))
+            else:
+                diff = chain_sum - grid_span
+                results.append(CheckResult(
+                    check_id=4,
+                    check_name="寸法合計",
+                    severity="NG",
+                    sleeve=None,
+                    message=(
+                        f"通り芯 {g_start.axis_label}–{g_end.axis_label} ({axis}): "
+                        f"{len(ch)}本の寸法合計 {chain_sum:.0f} ≠ "
+                        f"通り芯間 {grid_span:.0f}mm "
+                        f"（差 {diff:+.0f}mm）"
+                    ),
+                    related_coords=coords,
+                ))
+
+    # --- Horizontal dims (measure X span, grouped by dim-line Y position) ---
+    h_dims: dict[float, list[DimLine]] = defaultdict(list)
+    for d in dims:
+        dx = abs(d.defpoint2[0] - d.defpoint3[0])
+        dy = abs(d.defpoint2[1] - d.defpoint3[1])
+        if dx > dy and d.measurement > 10:
+            y_bin = round(d.defpoint1[1] / GROUP_BIN) * GROUP_BIN
+            h_dims[y_bin].append(d)
+
+    for y_bin, group in h_dims.items():
+        _detect_chains(
+            group,
+            get_start=lambda d: min(d.defpoint2[0], d.defpoint3[0]),
+            get_end=lambda d: max(d.defpoint2[0], d.defpoint3[0]),
+            grid_list=v_grids,
+            axis="X",
+        )
+
+    # --- Vertical dims (measure Y span, grouped by dim-line X position) ---
+    v_dims: dict[float, list[DimLine]] = defaultdict(list)
+    for d in dims:
+        dx = abs(d.defpoint2[0] - d.defpoint3[0])
+        dy = abs(d.defpoint2[1] - d.defpoint3[1])
+        if dy > dx and d.measurement > 10:
+            x_bin = round(d.defpoint1[0] / GROUP_BIN) * GROUP_BIN
+            v_dims[x_bin].append(d)
+
+    for x_bin, group in v_dims.items():
+        _detect_chains(
+            group,
+            get_start=lambda d: min(d.defpoint2[1], d.defpoint3[1]),
+            get_end=lambda d: max(d.defpoint2[1], d.defpoint3[1]),
+            grid_list=h_grids,
+            axis="Y",
+        )
 
     if not results:
         results.append(CheckResult(
@@ -499,7 +563,7 @@ def check_dim_sum(
             check_name="寸法合計",
             severity="OK",
             sleeve=None,
-            message="チェック対象の寸法・グリッドなし",
+            message="連続寸法チェーンなし",
         ))
 
     return results

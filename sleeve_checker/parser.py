@@ -549,6 +549,12 @@ def _extract_dim_lines(doc, msp) -> list[DimLine]:
             except Exception:
                 defpoint2 = (0.0, 0.0)
 
+            try:
+                dp3 = entity.dxf.defpoint3
+                defpoint3 = (dp3.x, dp3.y)
+            except Exception:
+                defpoint3 = (0.0, 0.0)
+
             text_override: str | None = None
             try:
                 txt = entity.dxf.text
@@ -569,6 +575,7 @@ def _extract_dim_lines(doc, msp) -> list[DimLine]:
                     measurement=float(measurement),
                     defpoint1=defpoint1,
                     defpoint2=defpoint2,
+                    defpoint3=defpoint3,
                     text_override=text_override,
                 )
             )

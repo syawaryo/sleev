@@ -404,14 +404,16 @@ class TestCheckColumnWallDim:
 class TestCheckDimSum:
     def test_ok_sums_match(self):
         # Two V grids at X=0 and X=1000 (span=1000)
-        # Two dims of 400 and 600 → sum=1000
+        # Chain: 0→400 (400mm) + 400→1000 (600mm) = 1000
         grids = [
             GridLine(axis_label="A", direction="V", position=0),
             GridLine(axis_label="B", direction="V", position=1000),
         ]
         dims = [
-            DimLine(layer="t", measurement=400.0, defpoint1=(0, 500), defpoint2=(400, 500)),
-            DimLine(layer="t", measurement=600.0, defpoint1=(400, 500), defpoint2=(1000, 500)),
+            DimLine(layer="t", measurement=400.0,
+                    defpoint1=(400, 500), defpoint2=(0, 500), defpoint3=(400, 500)),
+            DimLine(layer="t", measurement=600.0,
+                    defpoint1=(1000, 500), defpoint2=(400, 500), defpoint3=(1000, 500)),
         ]
         results = check_dim_sum(dims, grids)
         ok_results = [r for r in results if r.severity == "OK"]
@@ -419,23 +421,25 @@ class TestCheckDimSum:
 
     def test_ng_sums_dont_match(self):
         # Two V grids at X=0 and X=1000 (span=1000)
-        # Two dims of 400 and 500 → sum=900 ≠ 1000
+        # Chain: 0→400 (400mm) + 400→900 (500mm) = 900 ≠ 1000
         grids = [
             GridLine(axis_label="A", direction="V", position=0),
             GridLine(axis_label="B", direction="V", position=1000),
         ]
         dims = [
-            DimLine(layer="t", measurement=400.0, defpoint1=(0, 500), defpoint2=(400, 500)),
-            DimLine(layer="t", measurement=500.0, defpoint1=(400, 500), defpoint2=(900, 500)),
+            DimLine(layer="t", measurement=400.0,
+                    defpoint1=(400, 500), defpoint2=(0, 500), defpoint3=(400, 500)),
+            DimLine(layer="t", measurement=500.0,
+                    defpoint1=(900, 500), defpoint2=(400, 500), defpoint3=(900, 500)),
         ]
         results = check_dim_sum(dims, grids)
         ng_results = [r for r in results if r.severity == "NG"]
         assert len(ng_results) >= 1
 
     def test_ok_no_grids(self):
-        dims = [DimLine(layer="t", measurement=500.0, defpoint1=(0, 0), defpoint2=(500, 0))]
+        dims = [DimLine(layer="t", measurement=500.0,
+                        defpoint1=(500, 0), defpoint2=(0, 0), defpoint3=(500, 0))]
         results = check_dim_sum(dims, [])
-        # Should return OK or no NG
         ng_results = [r for r in results if r.severity == "NG"]
         assert len(ng_results) == 0
 
