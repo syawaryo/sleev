@@ -206,13 +206,24 @@ export default function DrawingView({
           </g>
         ))}
 
-        {/* P-N number labels from DXF */}
+        {/* P-N number labels + arrow lines from DXF */}
         {layers.sleeve && floorData.pn_labels?.map((pn, i) => (
-          <g key={`pn${i}`} transform={`translate(${pn.x},${pn.y})`}>
-            <g transform="scale(1,-1)">
-              <text x={0} y={0} fontSize={150} fill="#e11d48" fontWeight={700} textAnchor="middle" opacity={0.8}>
-                {pn.text}
-              </text>
+          <g key={`pn${i}`}>
+            {/* Arrow line: INSERT origin → tip (if arrow exists) */}
+            {pn.arrow_verts && pn.arrow_verts.length === 2 && (
+              <line
+                x1={pn.arrow_verts[0][0]} y1={pn.arrow_verts[0][1]}
+                x2={pn.arrow_verts[1][0]} y2={pn.arrow_verts[1][1]}
+                stroke="#e11d48" strokeWidth={12} opacity={0.6}
+              />
+            )}
+            {/* P-N text */}
+            <g transform={`translate(${pn.x},${pn.y})`}>
+              <g transform="scale(1,-1)">
+                <text x={0} y={0} fontSize={150} fill="#e11d48" fontWeight={700} textAnchor="middle" opacity={0.8}>
+                  {pn.text}
+                </text>
+              </g>
             </g>
           </g>
         ))}

@@ -823,56 +823,165 @@ def _extract_pn_labels(doc, msp) -> list[PnLabel]:
 
 
 # ---------------------------------------------------------------------------
-# Arrow HATCH extraction (filled triangles on 衛生通常 layer)
+# P-N leader line extraction (LINE on 衛生通常 connecting to LWPOLYLINE frame)
 # ---------------------------------------------------------------------------
 
-def _extract_arrow_hatches(doc, msp) -> list[tuple[float, float, list[tuple[float, float]]]]:
+def _extract_pn_pointers(
+    doc, msp, pn_labels: list[PnLabel]
+) -> dict[str, tuple[float, float]]:
     """
-    Extract arrow-shaped SOLID HATCHes on 衛生通常-like layers.
+    For each P-N label, find its pointer (leader LINE or arrow INSERT) and
+    return the far-end coordinate pointing toward the sleeve.
 
-    Returns a list of (center_x, center_y, vertices) tuples.
-    These triangular hatches sit between P-N text and the sleeve they point to.
+    Two pointer types coexist:
+    1. [衛生]通常 LINE — one end touching the P-N frame, other end → sleeve
+    2. [衛生]スリーブ INSERT — LWPOLY(3pts)+LINE arrow block near P-N, tip → sleeve
+
+    Returns {pn_text: (far_x, far_y)}.
     """
-    target_layers = set(
-        _find_layers_any(doc, ["衛生"])
-    )
-    # Only keep layers with "通常" or generic ones
-    target_layers = {l for l in target_layers if "通常" in l or l.endswith("]0")}
+    if not pn_labels:
+        return {}
 
-    arrows: list[tuple[float, float, list[tuple[float, float]]]] = []
+    衛生_layers = set(_find_layers_any(doc, ["衛生"]))
+    通常_layers = {l for l in 衛生_layers if "通常" in l}
+    スリーブ_layers = {l for l in 衛生_layers if "スリーブ" in l}
 
+    result: dict[str, tuple[float, float]] = {}
+
+    # --- Collect P-N frames (LWPOLY 4pts on 衛生通常) ---
+    frames: list[tuple[float, float, list[tuple[float, float]]]] = []
     for entity in msp:
-        if entity.dxftype() != "HATCH":
+        if entity.dxftype() != "LWPOLYLINE":
             continue
-        if entity.dxf.layer not in target_layers:
+        if entity.dxf.layer not in 通常_layers:
             continue
-        pattern = entity.dxf.get("pattern_name", "")
-        if pattern != "SOLID":
+        pts = [(float(p[0]), float(p[1])) for p in entity.get_points()]
+        if len(pts) != 4:
             continue
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        w, h = max(xs) - min(xs), max(ys) - min(ys)
+        if 100 < w < 800 and 50 < h < 800:
+            frames.append((sum(xs) / 4, sum(ys) / 4, pts))
 
+    pn_frames: dict[str, list[tuple[float, float]]] = {}
+    for pn in pn_labels:
+        best_d = 500.0
+        best_pts: list[tuple[float, float]] | None = None
+        for fcx, fcy, fpts in frames:
+            d = math.hypot(fcx - pn.x, fcy - pn.y)
+            if d < best_d:
+                best_d = d
+                best_pts = fpts
+        if best_pts is not None:
+            pn_frames[pn.text] = best_pts
+
+    # --- Source A: Leader LINEs on [衛生]通常 touching frame vertices ---
+    lines_通常: list[tuple[float, float, float, float]] = []
+    for entity in msp:
+        if entity.dxftype() != "LINE" or entity.dxf.layer not in 通常_layers:
+            continue
+        sx, sy = float(entity.dxf.start.x), float(entity.dxf.start.y)
+        ex, ey = float(entity.dxf.end.x), float(entity.dxf.end.y)
+        if math.hypot(ex - sx, ey - sy) > 200:
+            lines_通常.append((sx, sy, ex, ey))
+
+    for pn_text, frame_pts in pn_frames.items():
+        best_d = 100.0
+        best_far: tuple[float, float] | None = None
+        for sx, sy, ex, ey in lines_通常:
+            for fpt in frame_pts:
+                d_s = math.hypot(sx - fpt[0], sy - fpt[1])
+                if d_s < best_d:
+                    best_d = d_s
+                    best_far = (ex, ey)
+                d_e = math.hypot(ex - fpt[0], ey - fpt[1])
+                if d_e < best_d:
+                    best_d = d_e
+                    best_far = (sx, sy)
+        if best_far is not None:
+            result[pn_text] = best_far
+
+    # --- Source B: Arrow INSERTs on [衛生]スリーブ near P-N texts ---
+    arrow_inserts: list[tuple[float, float, tuple[float, float]]] = []
+    for entity in msp:
+        if entity.dxftype() != "INSERT" or entity.dxf.layer not in スリーブ_layers:
+            continue
+        name = entity.dxf.name
+        if any(kw in name for kw in ("スリーブ", "箱", "電気パイプ")):
+            continue
         try:
-            for path in entity.paths:
-                verts: list[tuple[float, float]] = []
-                if hasattr(path, "vertices"):
-                    verts = [(float(v[0]), float(v[1])) for v in path.vertices]
-                elif hasattr(path, "edges"):
-                    for edge in path.edges:
-                        if hasattr(edge, "start"):
-                            verts.append((float(edge.start[0]), float(edge.start[1])))
-
-                if len(verts) >= 3:
-                    cx = sum(v[0] for v in verts) / len(verts)
-                    cy = sum(v[1] for v in verts) / len(verts)
-                    if _in_building_range(cx, cy):
-                        arrows.append((cx, cy, verts))
+            block = doc.blocks.get(name)
         except Exception:
             continue
 
-    return arrows
+        tip_local = (0.0, 0.0)
+        best_d = 0.0
+        has_geom = False
+        for be in block:
+            if be.dxftype() == "LWPOLYLINE":
+                pts = [(float(p[0]), float(p[1])) for p in be.get_points()]
+                if len(pts) == 3:
+                    # Triangle: tip = vertex opposite the longest edge (base)
+                    edges = [
+                        (math.hypot(pts[1][0]-pts[2][0], pts[1][1]-pts[2][1]), 0),
+                        (math.hypot(pts[0][0]-pts[2][0], pts[0][1]-pts[2][1]), 1),
+                        (math.hypot(pts[0][0]-pts[1][0], pts[0][1]-pts[1][1]), 2),
+                    ]
+                    longest_edge_opposite = max(edges, key=lambda e: e[0])[1]
+                    tip_local = pts[longest_edge_opposite]
+                    best_d = math.hypot(tip_local[0], tip_local[1])
+                else:
+                    for p in pts:
+                        d = math.hypot(p[0], p[1])
+                        if d > best_d:
+                            best_d = d
+                            tip_local = p
+                has_geom = True
+            elif be.dxftype() == "LINE":
+                for pt in (be.dxf.start, be.dxf.end):
+                    px, py = float(pt.x), float(pt.y)
+                    d = math.hypot(px, py)
+                    if d > best_d:
+                        best_d = d
+                        tip_local = (px, py)
+                has_geom = True
+        if not has_geom or best_d < 100:
+            continue
+
+        ix, iy = float(entity.dxf.insert.x), float(entity.dxf.insert.y)
+        if _in_building_range(ix, iy):
+            arrow_inserts.append((ix, iy, (ix + tip_local[0], iy + tip_local[1])))
+
+    # For each arrow INSERT, find the P-N whose frame is closest to the
+    # arrow INSERT origin (not the tip).  Also verify the arrow tip is
+    # farther from the P-N than the INSERT origin (i.e. arrow points away).
+    used_arrows: set[int] = set()
+    for pn in sorted(pn_labels, key=lambda p: p.number):
+        if pn.text in result:
+            continue
+        best_arrow_d = float("inf")
+        best_arrow_idx: int | None = None
+        best_tip: tuple[float, float] | None = None
+        for i, (aix, aiy, (tip_x, tip_y)) in enumerate(arrow_inserts):
+            if i in used_arrows:
+                continue
+            d_origin = math.hypot(aix - pn.x, aiy - pn.y)
+            d_tip = math.hypot(tip_x - pn.x, tip_y - pn.y)
+            # Arrow origin should be near P-N, and tip should be farther away
+            if d_origin < best_arrow_d and d_tip > d_origin:
+                best_arrow_d = d_origin
+                best_arrow_idx = i
+                best_tip = (tip_x, tip_y)
+        if best_arrow_idx is not None and best_tip is not None and best_arrow_d < 3000:
+            result[pn.text] = best_tip
+            used_arrows.add(best_arrow_idx)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
-# P-N to sleeve assignment via arrow HATCHes
+# P-N to sleeve assignment
 # ---------------------------------------------------------------------------
 
 def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel],
@@ -880,13 +989,13 @@ def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel],
     """
     Assign each P-N label to its corresponding sleeve.
 
-    Strategy (arrow-tip method):
-    1. Extract arrow HATCH triangles from 衛生通常 layer.
-    2. For each arrow HATCH:
-       a. Find nearest P-N text to the arrow center (~165mm).
-       b. Find the arrow vertex closest to any sleeve = arrow tip.
-       c. Link: P-N ↔ arrow ↔ sleeve.
-    3. Remaining P-N labels without arrow matches fall back to nearest-neighbour.
+    Three patterns in the DXF:
+    1. P-N text + pointer (LINE or INSERT) → use pointer far-end for matching
+    2. P-N text only (no pointer) → nearest-neighbour from text position
+    3. Sleeve without P-N → not assigned
+
+    P-N numbers are only assigned to 衛生 (plumbing) sleeves.
+    空調/電気 sleeves do not carry P-N numbers.
     """
     if not pn_labels or not sleeves:
         return
@@ -894,43 +1003,37 @@ def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel],
     used_sleeves: set[str] = set()
     used_pns: set[str] = set()
 
-    # --- Phase 1: Arrow-based matching ---
+    # --- Phase 1: Pointer-based matching (LINE leaders + arrow INSERTs) ---
     if doc is not None and msp is not None:
-        arrows = _extract_arrow_hatches(doc, msp)
+        leaders = _extract_pn_pointers(doc, msp, pn_labels)
 
-        for acx, acy, verts in arrows:
-            # Find nearest P-N text to arrow center
-            best_pn_dist = float("inf")
-            best_pn: PnLabel | None = None
-            for pn in pn_labels:
-                if pn.text in used_pns:
-                    continue
-                d = math.hypot(acx - pn.x, acy - pn.y)
-                if d < best_pn_dist and d < 500:  # P-N should be very close to arrow
-                    best_pn_dist = d
-                    best_pn = pn
-
-            if best_pn is None:
+        for pn in sorted(pn_labels, key=lambda p: p.number):
+            if pn.text not in leaders:
                 continue
 
-            # Find arrow tip = vertex closest to any sleeve
+            far_x, far_y = leaders[pn.text]
+
+            # Find nearest 衛生 sleeve to pointer far-end
             best_tip_dist = float("inf")
             best_sleeve: Sleeve | None = None
-            for vert in verts:
-                for s in sleeves:
-                    if s.id in used_sleeves:
-                        continue
-                    d = math.hypot(vert[0] - s.center[0], vert[1] - s.center[1])
-                    if d < best_tip_dist:
-                        best_tip_dist = d
-                        best_sleeve = s
+            for s in sleeves:
+                if s.id in used_sleeves:
+                    continue
+                if s.discipline != "衛生":
+                    continue
+                d = math.hypot(far_x - s.center[0], far_y - s.center[1])
+                if d < best_tip_dist:
+                    best_tip_dist = d
+                    best_sleeve = s
 
-            if best_sleeve is not None and best_tip_dist < 3000:
-                best_sleeve.pn_number = best_pn.text
+            if best_sleeve is not None:
+                best_sleeve.pn_number = pn.text
+                # Store leader line endpoints for rendering
+                pn.arrow_verts = [(pn.x, pn.y), (far_x, far_y)]
                 used_sleeves.add(best_sleeve.id)
-                used_pns.add(best_pn.text)
+                used_pns.add(pn.text)
 
-    # --- Phase 2: Fallback nearest-neighbour for unmatched P-N labels ---
+    # --- Phase 2: Fallback nearest-neighbour for P-N without pointers ---
     for pn in sorted(pn_labels, key=lambda p: p.number):
         if pn.text in used_pns:
             continue
@@ -938,6 +1041,8 @@ def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel],
         best_sleeve: Sleeve | None = None
         for s in sleeves:
             if s.id in used_sleeves:
+                continue
+            if s.discipline != "衛生":
                 continue
             dist = math.hypot(s.center[0] - pn.x, s.center[1] - pn.y)
             if dist < best_dist:

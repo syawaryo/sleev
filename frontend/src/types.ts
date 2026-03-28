@@ -62,6 +62,7 @@ export interface PnLabel {
   y: number;
   text: string;  // "P-N-1"
   number: number;
+  arrow_verts: [number, number][];  // triangle vertices, empty if no arrow
 }
 
 export interface SlabOutline {

@@ -66,6 +66,7 @@ class PnLabel:
     y: float
     text: str     # "P-N-1"
     number: int
+    arrow_verts: list[tuple[float, float]] = field(default_factory=list)  # triangle vertices, empty if no arrow
 
 
 @dataclass

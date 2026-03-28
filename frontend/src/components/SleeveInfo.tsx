@@ -27,7 +27,7 @@ export default function SleeveInfo({ sleeve, results }: Props) {
           <span style={{ background: badge.bg, color: badge.color, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>{worst}</span>
           <span style={{ fontWeight: 700, color: "#111827", fontSize: 15 }}>{sleeve.pn_number || sleeve.id}</span>
         </div>
-        <div style={{ color: "#9ca3af", fontSize: 11, marginTop: 4 }}>{sleeve.discipline} | {sleeve.layer}</div>
+        <div style={{ color: "#9ca3af", fontSize: 11, marginTop: 4 }}>{sleeve.layer}</div>
       </div>
 
       {/* Properties */}
