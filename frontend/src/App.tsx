@@ -27,6 +27,8 @@ function App() {
   const [hoveredSleeve, setHoveredSleeve] = useState<Sleeve | null>(null);
   const [selectedSleeve, setSelectedSleeve] = useState<Sleeve | null>(null);
   const [filter, setFilter] = useState<"all" | "NG" | "WARNING" | "OK">("all");
+  const [navigateTarget, setNavigateTarget] = useState<[number, number] | null>(null);
+  const [highlightCoords, setHighlightCoords] = useState<[number, number][]>([]);
   const [layers, setLayers] = useState({
     grid: true, wall: true, step: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false,
   });
@@ -208,6 +210,21 @@ function App() {
                   }}>{label}</button>
               ))}
             </div>
+
+            {/* Color legend */}
+            {colorMode === "severity" && (
+              <div style={{ display: "flex", gap: 8, fontSize: 10, alignItems: "center", marginLeft: 4 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />NG</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#d97706", display: "inline-block" }} />WARN</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16a34a", display: "inline-block" }} />OK</span>
+              </div>
+            )}
+            {colorMode === "discipline" && (
+              <div style={{ display: "flex", gap: 8, fontSize: 10, alignItems: "center", marginLeft: 4 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />衛生</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />空調</span>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -228,6 +245,9 @@ function App() {
                   selectedSleeveId={selectedSleeve?.id || null}
                   layers={layers}
                   colorMode={colorMode}
+                  navigateTarget={navigateTarget}
+                  onNavigated={() => setNavigateTarget(null)}
+                  highlightCoords={highlightCoords}
                 />
               ) : (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
@@ -249,7 +269,22 @@ function App() {
         ) : (
           <div style={{ flex: 1, overflow: "auto" }}>
             {floorData ? (
-              <ListView floorData={floorData} results={results} filter={filter} />
+              <ListView
+                floorData={floorData}
+                results={results}
+                filter={filter}
+                onNavigate={(coords, sleeveId, relatedCoords) => {
+                  setViewMode("drawing");
+                  setNavigateTarget(coords);
+                  setHighlightCoords(relatedCoords || []);
+                  if (sleeveId) {
+                    const sleeve = floorData?.sleeves.find(s => s.id === sleeveId);
+                    if (sleeve) setSelectedSleeve(sleeve);
+                  } else {
+                    setSelectedSleeve(null);
+                  }
+                }}
+              />
             ) : (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
                 「チェック実行」を押してください

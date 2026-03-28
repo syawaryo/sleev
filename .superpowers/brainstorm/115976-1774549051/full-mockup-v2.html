@@ -1,0 +1,212 @@
+<h2>最終レイアウト v2</h2>
+<p class="subtitle">図面/一覧切替 + 階数セグメント2段目</p>
+
+<div class="split">
+  <!-- 図面モード -->
+  <div class="mockup">
+    <div class="mockup-header">「図面」モード</div>
+    <div class="mockup-body" style="background:#f8fafc;padding:0;overflow:hidden;">
+
+      <!-- Row 1: Title + view toggle + summary -->
+      <div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:10px 20px;display:flex;align-items:center;gap:12px;">
+        <b style="font-size:15px;color:#111827;letter-spacing:-0.3px;">スリーブチェッカー</b>
+        <!-- 図面/一覧 toggle -->
+        <div style="display:inline-flex;background:#f3f4f6;border-radius:7px;padding:2px;gap:2px;font-size:12px;margin-left:12px;">
+          <span style="padding:4px 14px;background:#111827;border-radius:5px;color:#fff;font-weight:500;">図面</span>
+          <span style="padding:4px 14px;border-radius:5px;color:#9ca3af;">一覧</span>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:6px;font-size:11px;">
+          <span style="color:#9ca3af;">143 スリーブ</span>
+          <span style="background:#fef2f2;color:#dc2626;padding:1px 8px;border-radius:4px;font-weight:600;">3 NG</span>
+          <span style="background:#fffbeb;color:#d97706;padding:1px 8px;border-radius:4px;font-weight:600;">5 WARN</span>
+          <span style="background:#f0fdf4;color:#16a34a;padding:1px 8px;border-radius:4px;font-weight:600;">135 OK</span>
+        </div>
+      </div>
+
+      <!-- Row 2: Floor tabs + DXF add -->
+      <div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:6px 20px;display:flex;align-items:center;gap:10px;">
+        <div style="display:inline-flex;background:#f3f4f6;border-radius:7px;padding:2px;gap:2px;font-size:12px;">
+          <span style="padding:4px 16px;border-radius:5px;color:#9ca3af;">1F</span>
+          <span style="padding:4px 16px;background:#fff;border-radius:5px;color:#111827;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.06);">2F</span>
+          <span style="padding:4px 16px;border-radius:5px;color:#9ca3af;">3F</span>
+        </div>
+        <button style="padding:3px 12px;font-size:11px;background:#fff;border:1px dashed #d1d5db;border-radius:6px;color:#9ca3af;cursor:pointer;">+ DXF追加</button>
+      </div>
+
+      <!-- Row 3: Layer controls -->
+      <div style="background:#fafbfc;border-bottom:1px solid #f3f4f6;padding:5px 20px;display:flex;gap:6px;align-items:center;font-size:11px;">
+        <span style="color:#9ca3af;font-size:10px;">レイヤー</span>
+        <span style="border:1px solid #93c5fd;color:#3b82f6;background:#eff6ff;padding:2px 10px;border-radius:4px;">通り芯</span>
+        <span style="border:1px solid #d1d5db;color:#6b7280;background:#fff;padding:2px 10px;border-radius:4px;">壁</span>
+        <span style="border:1px solid #fbbf24;color:#b45309;background:#fffbeb;padding:2px 10px;border-radius:4px;">段差線</span>
+        <span style="border:1px solid #86efac;color:#16a34a;background:#f0fdf4;padding:2px 10px;border-radius:4px;">スリーブ</span>
+        <span style="color:#e5e7eb;margin:0 2px;">|</span>
+        <span style="color:#9ca3af;font-size:10px;">色分け</span>
+        <div style="display:inline-flex;background:#f3f4f6;border-radius:5px;padding:2px;gap:1px;">
+          <span style="padding:2px 10px;background:#fff;border-radius:4px;color:#111827;font-size:10px;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.05);">判定</span>
+          <span style="padding:2px 10px;border-radius:4px;color:#9ca3af;font-size:10px;">FL高さ</span>
+          <span style="padding:2px 10px;border-radius:4px;color:#9ca3af;font-size:10px;">設備</span>
+        </div>
+      </div>
+
+      <!-- Drawing -->
+      <div style="position:relative;background:#fdfdfe;min-height:220px;">
+        <svg style="position:absolute;inset:0;width:100%;height:100%;" viewBox="0 0 800 260">
+          <line x1="40" y1="10" x2="40" y2="250" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+          <line x1="180" y1="10" x2="180" y2="250" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+          <line x1="400" y1="10" x2="400" y2="250" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+          <line x1="600" y1="10" x2="600" y2="250" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+          <line x1="760" y1="10" x2="760" y2="250" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+          <line x1="20" y1="50" x2="780" y2="50" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+          <line x1="20" y1="130" x2="780" y2="130" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+          <line x1="20" y1="210" x2="780" y2="210" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+          <line x1="40" y1="50" x2="760" y2="50" stroke="#cbd5e1" stroke-width="1.5"/>
+          <line x1="40" y1="210" x2="760" y2="210" stroke="#cbd5e1" stroke-width="1.5"/>
+          <line x1="40" y1="50" x2="40" y2="210" stroke="#cbd5e1" stroke-width="1.5"/>
+          <line x1="760" y1="50" x2="760" y2="210" stroke="#cbd5e1" stroke-width="1.5"/>
+          <!-- OK -->
+          <circle cx="120" cy="90" r="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="120" cy="90" r="1.2" fill="#16a34a"/>
+          <circle cx="200" cy="160" r="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="200" cy="160" r="1.2" fill="#16a34a"/>
+          <circle cx="450" cy="180" r="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="450" cy="180" r="1.2" fill="#16a34a"/>
+          <circle cx="680" cy="100" r="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/><circle cx="680" cy="100" r="1" fill="#16a34a"/>
+          <!-- NG -->
+          <circle cx="550" cy="120" r="6" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8"/><circle cx="550" cy="120" r="1.5" fill="#dc2626"/>
+          <circle cx="550" cy="120" r="12" fill="none" stroke="#dc2626" stroke-width="0.5" stroke-dasharray="2,1" opacity="0.5"/>
+          <!-- WARN -->
+          <circle cx="350" cy="170" r="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/><circle cx="350" cy="170" r="1.2" fill="#d97706"/>
+        </svg>
+
+        <!-- Floating card -->
+        <div style="position:absolute;bottom:12px;right:12px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;width:240px;box-shadow:0 4px 16px rgba(0,0,0,0.06);overflow:hidden;font-size:11px;">
+          <div style="padding:10px 14px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:6px;">
+            <span style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;">NG</span>
+            <span style="font-weight:700;color:#111827;font-size:13px;">P-N-17</span>
+            <span style="margin-left:auto;color:#9ca3af;font-size:9px;">衛生</span>
+          </div>
+          <div style="padding:8px 14px;display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <div><div style="color:#9ca3af;font-size:8px;">径</div><div style="color:#111827;font-weight:600;">175mm</div></div>
+            <div><div style="color:#9ca3af;font-size:8px;">FL</div><div style="color:#111827;font-weight:600;">FL-225</div></div>
+          </div>
+          <div style="padding:6px 14px 10px;border-top:1px solid #f3f4f6;">
+            <div style="background:#fef2f2;border-left:2px solid #ef4444;padding:5px 8px;border-radius:0 4px 4px 0;margin-bottom:3px;font-size:10px;">
+              <span style="color:#dc2626;font-weight:600;">#8</span> <span style="color:#7f1d1d;">FL記載なし</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 一覧モード -->
+  <div class="mockup">
+    <div class="mockup-header">「一覧」モード</div>
+    <div class="mockup-body" style="background:#f8fafc;padding:0;overflow:hidden;">
+
+      <!-- Row 1 -->
+      <div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:10px 20px;display:flex;align-items:center;gap:12px;">
+        <b style="font-size:15px;color:#111827;letter-spacing:-0.3px;">スリーブチェッカー</b>
+        <div style="display:inline-flex;background:#f3f4f6;border-radius:7px;padding:2px;gap:2px;font-size:12px;margin-left:12px;">
+          <span style="padding:4px 14px;border-radius:5px;color:#9ca3af;">図面</span>
+          <span style="padding:4px 14px;background:#111827;border-radius:5px;color:#fff;font-weight:500;">一覧</span>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:6px;font-size:11px;">
+          <span style="color:#9ca3af;">143 スリーブ</span>
+          <span style="background:#fef2f2;color:#dc2626;padding:1px 8px;border-radius:4px;font-weight:600;">3 NG</span>
+          <span style="background:#fffbeb;color:#d97706;padding:1px 8px;border-radius:4px;font-weight:600;">5 WARN</span>
+          <span style="background:#f0fdf4;color:#16a34a;padding:1px 8px;border-radius:4px;font-weight:600;">135 OK</span>
+        </div>
+      </div>
+
+      <!-- Row 2: Floor tabs -->
+      <div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:6px 20px;display:flex;align-items:center;gap:10px;">
+        <div style="display:inline-flex;background:#f3f4f6;border-radius:7px;padding:2px;gap:2px;font-size:12px;">
+          <span style="padding:4px 16px;border-radius:5px;color:#9ca3af;">1F</span>
+          <span style="padding:4px 16px;background:#fff;border-radius:5px;color:#111827;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.06);">2F</span>
+          <span style="padding:4px 16px;border-radius:5px;color:#9ca3af;">3F</span>
+        </div>
+        <button style="padding:3px 12px;font-size:11px;background:#fff;border:1px dashed #d1d5db;border-radius:6px;color:#9ca3af;cursor:pointer;">+ DXF追加</button>
+
+        <!-- Filters -->
+        <div style="margin-left:auto;display:flex;gap:4px;font-size:11px;">
+          <span style="padding:3px 10px;background:#f3f4f6;border-radius:4px;color:#111827;font-weight:500;">全て (143)</span>
+          <span style="padding:3px 10px;border:1px solid #fecaca;border-radius:4px;color:#dc2626;">NG (3)</span>
+          <span style="padding:3px 10px;border:1px solid #fde68a;border-radius:4px;color:#d97706;">WARN (5)</span>
+          <span style="padding:3px 10px;border:1px solid #bbf7d0;border-radius:4px;color:#16a34a;">OK (135)</span>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div style="padding:0;font-size:11px;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="background:#f9fafb;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:10px;text-align:left;">
+              <th style="padding:8px 16px;">スリーブ</th>
+              <th style="padding:8px;">径</th>
+              <th style="padding:8px;">FL</th>
+              <th style="padding:8px;">設備</th>
+              <th style="padding:8px;">判定</th>
+              <th style="padding:8px;">NG項目</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid #f3f4f6;background:#fef2f2;">
+              <td style="padding:8px 16px;font-weight:600;color:#111827;">P-N-17</td>
+              <td style="padding:8px;color:#374151;">175mm</td>
+              <td style="padding:8px;color:#374151;">FL-225</td>
+              <td style="padding:8px;color:#374151;">衛生</td>
+              <td style="padding:8px;"><span style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;border:1px solid #fecaca;">NG</span></td>
+              <td style="padding:8px;color:#dc2626;font-size:10px;">#8 FL記載なし, #14 P-N番号なし</td>
+            </tr>
+            <tr style="border-bottom:1px solid #f3f4f6;background:#fef2f2;">
+              <td style="padding:8px 16px;font-weight:600;color:#111827;">P-N-22</td>
+              <td style="padding:8px;color:#374151;">200mm</td>
+              <td style="padding:8px;color:#374151;">FL-225</td>
+              <td style="padding:8px;color:#374151;">衛生</td>
+              <td style="padding:8px;"><span style="background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;border:1px solid #fecaca;">NG</span></td>
+              <td style="padding:8px;color:#dc2626;font-size:10px;">#6 下階壁干渉</td>
+            </tr>
+            <tr style="border-bottom:1px solid #f3f4f6;background:#fffbeb;">
+              <td style="padding:8px 16px;font-weight:600;color:#111827;">P-N-35</td>
+              <td style="padding:8px;color:#374151;">100mm</td>
+              <td style="padding:8px;color:#374151;">FL-750</td>
+              <td style="padding:8px;color:#374151;">衛生</td>
+              <td style="padding:8px;"><span style="background:#fffbeb;color:#d97706;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;border:1px solid #fde68a;">WARN</span></td>
+              <td style="padding:8px;color:#d97706;font-size:10px;">#5 勾配記載なし</td>
+            </tr>
+            <tr style="border-bottom:1px solid #f3f4f6;">
+              <td style="padding:8px 16px;font-weight:500;color:#374151;">P-N-1</td>
+              <td style="padding:8px;color:#6b7280;">175mm</td>
+              <td style="padding:8px;color:#6b7280;">FL-225</td>
+              <td style="padding:8px;color:#6b7280;">衛生</td>
+              <td style="padding:8px;"><span style="background:#f0fdf4;color:#16a34a;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:500;border:1px solid #bbf7d0;">OK</span></td>
+              <td style="padding:8px;color:#9ca3af;font-size:10px;">-</td>
+            </tr>
+            <tr style="border-bottom:1px solid #f3f4f6;">
+              <td style="padding:8px 16px;font-weight:500;color:#374151;">P-N-2</td>
+              <td style="padding:8px;color:#6b7280;">200mm</td>
+              <td style="padding:8px;color:#6b7280;">FL-225</td>
+              <td style="padding:8px;color:#6b7280;">衛生</td>
+              <td style="padding:8px;"><span style="background:#f0fdf4;color:#16a34a;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:500;border:1px solid #bbf7d0;">OK</span></td>
+              <td style="padding:8px;color:#9ca3af;font-size:10px;">-</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="options" style="margin-top:20px;">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">&#10003;</div>
+    <div class="content">
+      <h3>これで実装GO</h3>
+    </div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">&#9998;</div>
+    <div class="content">
+      <h3>修正したい</h3>
+    </div>
+  </div>
+</div>

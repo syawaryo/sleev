@@ -10,6 +10,9 @@ interface Props {
   selectedSleeveId: string | null;
   layers: { grid: boolean; wall: boolean; step: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean };
   colorMode: "severity" | "fl" | "discipline";
+  navigateTarget?: [number, number] | null;
+  onNavigated?: () => void;
+  highlightCoords?: [number, number][];
 }
 
 const SEVERITY_COLORS: Record<string, { stroke: string; fill: string }> = {
@@ -42,7 +45,7 @@ const MAX_ZOOM_W = 200000;
 
 export default function DrawingView({
   floorData, lowerFloorData, results, onSleeveHover, onSleeveClick,
-  selectedSleeveId, layers, colorMode,
+  selectedSleeveId, layers, colorMode, navigateTarget, onNavigated, highlightCoords,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [vb, setVb] = useState(INITIAL_VB);
@@ -100,6 +103,17 @@ export default function DrawingView({
   }, []);
 
   const handleDoubleClick = useCallback(() => setVb(INITIAL_VB), []);
+
+  // Navigate to target coordinates (from list view click)
+  useEffect(() => {
+    if (navigateTarget) {
+      const [tx, ty] = navigateTarget;
+      const zoomW = 15000;
+      const zoomH = 7500;
+      setVb({ x: tx - zoomW / 2, y: -ty - zoomH / 2, w: zoomW, h: zoomH });
+      onNavigated?.();
+    }
+  }, [navigateTarget, onNavigated]);
 
   const severityMap = useMemo(() => {
     const map = new Map<string, "NG" | "WARNING" | "OK">();
@@ -177,13 +191,20 @@ export default function DrawingView({
 
           // defpoint2 = 1st ext line origin, defpoint3 = 2nd ext line origin
           // defpoint1 = dimension line position (offset from measurement points)
+          // angle = rotation (0/null=horizontal, 90/270=vertical)
           const x1 = d.defpoint2[0], y1 = d.defpoint2[1];
           const x2 = d.defpoint3[0], y2 = d.defpoint3[1];
 
-          // Dimension line runs parallel to defpoint2→defpoint3 but at defpoint1's offset
-          const dx = Math.abs(x2 - x1);
-          const dy = Math.abs(y2 - y1);
-          const isHorizontal = dx >= dy;
+          // Use angle if available, otherwise detect from defpoints
+          let isHorizontal: boolean;
+          if (d.angle !== null && d.angle !== undefined) {
+            const normAngle = ((d.angle % 360) + 360) % 360;
+            isHorizontal = normAngle < 45 || normAngle > 315 || (normAngle > 135 && normAngle < 225);
+          } else {
+            const dx = Math.abs(x2 - x1);
+            const dy = Math.abs(y2 - y1);
+            isHorizontal = dx >= dy;
+          }
 
           // Dimension line endpoints (projected to defpoint1 offset)
           let dlx1: number, dly1: number, dlx2: number, dly2: number;
@@ -293,8 +314,15 @@ export default function DrawingView({
               onClick={(e) => { e.stopPropagation(); onSleeveClick(s); }}>
               <circle cx={s.center[0]} cy={s.center[1]} r={r * 1.8} fill="transparent" stroke="none" />
               {isSelected && (
-                <circle cx={s.center[0]} cy={s.center[1]} r={r + 80}
-                  fill="none" stroke={colors.stroke} strokeWidth={15} strokeDasharray="60,30" opacity={0.5} />
+                <>
+                  <circle cx={s.center[0]} cy={s.center[1]} r={r + 200}
+                    fill="none" stroke="#ef4444" strokeWidth={25} opacity={0.8}>
+                    <animate attributeName="r" from={r + 100} to={r + 400} dur="1s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" from="0.8" to="0" dur="1s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx={s.center[0]} cy={s.center[1]} r={r + 80}
+                    fill="none" stroke="#ef4444" strokeWidth={20} strokeDasharray="60,30" opacity={0.7} />
+                </>
               )}
               <circle cx={s.center[0]} cy={s.center[1]} r={r}
                 fill={colors.fill} stroke={colors.stroke} strokeWidth={isSelected ? 35 : 20} />
@@ -302,6 +330,19 @@ export default function DrawingView({
             </g>
           );
         })}
+
+        {/* Highlight markers from list navigation */}
+        {highlightCoords && highlightCoords.length > 0 && highlightCoords.map((c, i) => (
+          <g key={`hl${i}`}>
+            <circle cx={c[0]} cy={c[1]} r={300}
+              fill="none" stroke="#ef4444" strokeWidth={30} opacity={0.9}>
+              <animate attributeName="r" from="200" to="500" dur="1s" repeatCount="indefinite" />
+              <animate attributeName="opacity" from="0.9" to="0" dur="1s" repeatCount="indefinite" />
+            </circle>
+            <circle cx={c[0]} cy={c[1]} r={150}
+              fill="#ef4444" opacity={0.4} />
+          </g>
+        ))}
       </g>
     </svg>
   );

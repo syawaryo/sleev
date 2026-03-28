@@ -28,6 +28,7 @@ class DimLine:
     defpoint1: tuple[float, float]   # defpoint (10): dimension line position
     defpoint2: tuple[float, float]   # defpoint2 (13): 1st extension line origin
     defpoint3: tuple[float, float] = (0.0, 0.0)  # defpoint3 (14): 2nd extension line origin
+    angle: float | None = None       # rotation angle (group 50), None = auto
     text_override: str | None = None
 
 

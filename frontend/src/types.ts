@@ -40,6 +40,7 @@ export interface DimLine {
   defpoint1: [number, number];  // dimension line position
   defpoint2: [number, number];  // 1st extension line origin
   defpoint3: [number, number];  // 2nd extension line origin
+  angle: number | null;         // rotation angle (degrees), null = auto
   text_override: string | null;
 }
 

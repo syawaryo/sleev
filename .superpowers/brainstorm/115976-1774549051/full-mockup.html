@@ -1,0 +1,181 @@
+<h2>最終レイアウト確認</h2>
+<p class="subtitle">C案 + Bセグメント + 白ベース</p>
+
+<div class="mockup">
+  <div class="mockup-header">完成イメージ</div>
+  <div class="mockup-body" style="background:#f8fafc;padding:0;overflow:hidden;">
+
+    <!-- Header -->
+    <div style="background:#fff;border-bottom:1px solid #e5e7eb;padding:10px 20px;display:flex;align-items:center;gap:16px;">
+      <b style="font-size:15px;color:#111827;letter-spacing:-0.3px;">スリーブチェッカー</b>
+
+      <!-- 図面種別 segment -->
+      <div style="display:inline-flex;background:#f3f4f6;border-radius:8px;padding:3px;gap:2px;font-size:12px;margin-left:8px;">
+        <span style="padding:5px 14px;background:#fff;border-radius:6px;color:#111827;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.06);">スリーブ</span>
+        <span style="padding:5px 14px;border-radius:6px;color:#9ca3af;">電気</span>
+        <span style="padding:5px 14px;border-radius:6px;color:#9ca3af;">衛生配管</span>
+        <span style="padding:5px 14px;border-radius:6px;color:#9ca3af;">空調配管</span>
+        <span style="padding:5px 14px;border-radius:6px;color:#9ca3af;">空調ダクト</span>
+      </div>
+
+      <!-- 階数 segment -->
+      <div style="display:inline-flex;background:#f3f4f6;border-radius:6px;padding:2px;gap:2px;font-size:12px;">
+        <span style="padding:4px 16px;border-radius:5px;color:#9ca3af;">1F</span>
+        <span style="padding:4px 16px;background:#111827;border-radius:5px;color:#fff;font-weight:500;">2F</span>
+        <span style="padding:4px 16px;border-radius:5px;color:#9ca3af;">3F</span>
+      </div>
+
+      <!-- DXF upload button -->
+      <button style="padding:5px 12px;font-size:11px;background:#fff;border:1px solid #d1d5db;border-radius:6px;color:#6b7280;cursor:pointer;margin-left:4px;">
+        + DXF追加
+      </button>
+
+      <!-- Summary -->
+      <div style="margin-left:auto;display:flex;gap:16px;font-size:12px;align-items:center;">
+        <span style="color:#9ca3af;">143 スリーブ</span>
+        <div style="display:flex;gap:2px;">
+          <span style="background:#fef2f2;color:#dc2626;padding:2px 10px;border-radius:4px;font-weight:600;font-size:11px;">3 NG</span>
+          <span style="background:#fffbeb;color:#d97706;padding:2px 10px;border-radius:4px;font-weight:600;font-size:11px;">5 WARN</span>
+          <span style="background:#f0fdf4;color:#16a34a;padding:2px 10px;border-radius:4px;font-weight:600;font-size:11px;">135 OK</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Layer controls -->
+    <div style="background:#fafbfc;border-bottom:1px solid #f3f4f6;padding:5px 20px;display:flex;gap:6px;align-items:center;font-size:11px;">
+      <span style="color:#9ca3af;font-size:10px;">レイヤー</span>
+      <span style="border:1px solid #93c5fd;color:#3b82f6;background:#eff6ff;padding:2px 10px;border-radius:4px;cursor:pointer;">通り芯</span>
+      <span style="border:1px solid #d1d5db;color:#6b7280;background:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;">壁</span>
+      <span style="border:1px solid #fbbf24;color:#b45309;background:#fffbeb;padding:2px 10px;border-radius:4px;cursor:pointer;">段差線</span>
+      <span style="border:1px solid #86efac;color:#16a34a;background:#f0fdf4;padding:2px 10px;border-radius:4px;cursor:pointer;">スリーブ</span>
+      <span style="border:1px solid #d1d5db;color:#9ca3af;background:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;opacity:0.6;">1F壁</span>
+
+      <span style="color:#e5e7eb;margin:0 4px;">|</span>
+      <span style="color:#9ca3af;font-size:10px;">色分け</span>
+      <div style="display:inline-flex;background:#f3f4f6;border-radius:5px;padding:2px;gap:1px;">
+        <span style="padding:2px 10px;background:#fff;border-radius:4px;color:#111827;font-size:10px;font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.05);">判定</span>
+        <span style="padding:2px 10px;border-radius:4px;color:#9ca3af;font-size:10px;">FL高さ</span>
+        <span style="padding:2px 10px;border-radius:4px;color:#9ca3af;font-size:10px;">設備</span>
+      </div>
+    </div>
+
+    <!-- Drawing area -->
+    <div style="position:relative;background:#fdfdfe;min-height:300px;">
+      <svg style="position:absolute;inset:0;width:100%;height:100%;" viewBox="0 0 800 380">
+        <!-- Grid -->
+        <line x1="40" y1="20" x2="40" y2="360" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="180" y1="20" x2="180" y2="360" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="280" y1="20" x2="280" y2="360" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="400" y1="20" x2="400" y2="360" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="520" y1="20" x2="520" y2="360" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="640" y1="20" x2="640" y2="360" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="760" y1="20" x2="760" y2="360" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="20" y1="60" x2="780" y2="60" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="20" y1="150" x2="780" y2="150" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="20" y1="240" x2="780" y2="240" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+        <line x1="20" y1="330" x2="780" y2="330" stroke="#e5e7eb" stroke-width="0.5" stroke-dasharray="4,2"/>
+
+        <!-- Grid labels -->
+        <text x="40" y="16" font-size="8" fill="#9ca3af" text-anchor="middle">1</text>
+        <text x="180" y="16" font-size="8" fill="#9ca3af" text-anchor="middle">2</text>
+        <text x="280" y="16" font-size="8" fill="#9ca3af" text-anchor="middle">3</text>
+        <text x="400" y="16" font-size="8" fill="#9ca3af" text-anchor="middle">4</text>
+        <text x="520" y="16" font-size="8" fill="#9ca3af" text-anchor="middle">5</text>
+        <text x="640" y="16" font-size="8" fill="#9ca3af" text-anchor="middle">6</text>
+        <text x="760" y="16" font-size="8" fill="#9ca3af" text-anchor="middle">7</text>
+        <text x="14" y="63" font-size="8" fill="#9ca3af" text-anchor="middle">A</text>
+        <text x="14" y="153" font-size="8" fill="#9ca3af" text-anchor="middle">B</text>
+        <text x="14" y="243" font-size="8" fill="#9ca3af" text-anchor="middle">C</text>
+        <text x="14" y="333" font-size="8" fill="#9ca3af" text-anchor="middle">D</text>
+
+        <!-- Walls -->
+        <line x1="40" y1="60" x2="40" y2="330" stroke="#cbd5e1" stroke-width="1.5"/>
+        <line x1="760" y1="60" x2="760" y2="330" stroke="#cbd5e1" stroke-width="1.5"/>
+        <line x1="40" y1="60" x2="760" y2="60" stroke="#cbd5e1" stroke-width="1.5"/>
+        <line x1="40" y1="330" x2="760" y2="330" stroke="#cbd5e1" stroke-width="1.5"/>
+        <line x1="280" y1="150" x2="280" y2="330" stroke="#cbd5e1" stroke-width="1"/>
+        <line x1="520" y1="60" x2="520" y2="240" stroke="#cbd5e1" stroke-width="1"/>
+
+        <!-- Step lines -->
+        <rect x="518" y="148" width="124" height="94" fill="none" stroke="#f59e0b" stroke-width="0.8" stroke-dasharray="3,2" opacity="0.4"/>
+
+        <!-- OK sleeves -->
+        <circle cx="120" cy="110" r="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="120" cy="110" r="1.2" fill="#16a34a"/>
+        <circle cx="150" cy="110" r="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="150" cy="110" r="1.2" fill="#16a34a"/>
+        <circle cx="120" cy="180" r="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="120" cy="180" r="1.5" fill="#16a34a"/>
+        <circle cx="200" cy="200" r="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="200" cy="200" r="1.2" fill="#16a34a"/>
+        <circle cx="350" cy="100" r="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/><circle cx="350" cy="100" r="1" fill="#16a34a"/>
+        <circle cx="450" cy="290" r="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="450" cy="290" r="1.2" fill="#16a34a"/>
+        <circle cx="680" cy="110" r="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="680" cy="110" r="1.2" fill="#16a34a"/>
+        <circle cx="700" cy="280" r="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1"/><circle cx="700" cy="280" r="1" fill="#16a34a"/>
+        <circle cx="320" cy="280" r="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.2"/><circle cx="320" cy="280" r="1.2" fill="#16a34a"/>
+
+        <!-- NG sleeves -->
+        <circle cx="550" cy="170" r="6" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8"/><circle cx="550" cy="170" r="1.5" fill="#dc2626"/>
+        <circle cx="580" cy="200" r="5" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8"/><circle cx="580" cy="200" r="1.2" fill="#dc2626"/>
+        <circle cx="600" cy="180" r="5" fill="#fef2f2" stroke="#dc2626" stroke-width="1.8"/><circle cx="600" cy="180" r="1.2" fill="#dc2626"/>
+
+        <!-- WARNING sleeves -->
+        <circle cx="350" cy="250" r="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/><circle cx="350" cy="250" r="1.2" fill="#d97706"/>
+        <circle cx="160" cy="300" r="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/><circle cx="160" cy="300" r="1.5" fill="#d97706"/>
+
+        <!-- Hover ring on NG sleeve -->
+        <circle cx="550" cy="170" r="12" fill="none" stroke="#dc2626" stroke-width="0.5" stroke-dasharray="2,1" opacity="0.5"/>
+      </svg>
+
+      <!-- Floating detail card -->
+      <div style="position:absolute;bottom:16px;right:16px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;width:280px;box-shadow:0 4px 16px rgba(0,0,0,0.06);overflow:hidden;">
+        <!-- Card header -->
+        <div style="padding:12px 16px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:8px;">
+          <span style="background:#fef2f2;color:#dc2626;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;">NG</span>
+          <span style="font-weight:700;color:#111827;font-size:15px;">P-N-17</span>
+          <span style="margin-left:auto;color:#9ca3af;font-size:10px;">衛生</span>
+        </div>
+        <!-- Card properties -->
+        <div style="padding:10px 16px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
+          <div><div style="color:#9ca3af;font-size:9px;margin-bottom:1px;">径</div><div style="color:#111827;font-weight:600;">175mm</div></div>
+          <div><div style="color:#9ca3af;font-size:9px;margin-bottom:1px;">FL</div><div style="color:#111827;font-weight:600;">FL-225</div></div>
+          <div><div style="color:#9ca3af;font-size:9px;margin-bottom:1px;">種別</div><div style="color:#374151;">SD φ175</div></div>
+          <div><div style="color:#9ca3af;font-size:9px;margin-bottom:1px;">座標</div><div style="color:#374151;font-size:11px;">(54209, 28855)</div></div>
+        </div>
+        <!-- Card issues -->
+        <div style="padding:8px 16px 12px;border-top:1px solid #f3f4f6;">
+          <div style="background:#fef2f2;border-left:3px solid #ef4444;padding:8px 10px;border-radius:0 6px 6px 0;margin-bottom:4px;">
+            <div style="display:flex;align-items:center;gap:6px;"><span style="color:#dc2626;font-weight:600;font-size:11px;">#8</span><span style="color:#7f1d1d;font-size:11px;">基準レベル記載</span></div>
+            <div style="color:#6b7280;font-size:10px;margin-top:2px;">FL記載なし</div>
+          </div>
+          <div style="background:#fef2f2;border-left:3px solid #ef4444;padding:8px 10px;border-radius:0 6px 6px 0;">
+            <div style="display:flex;align-items:center;gap:6px;"><span style="color:#dc2626;font-weight:600;font-size:11px;">#14</span><span style="color:#7f1d1d;font-size:11px;">スリーブNo</span></div>
+            <div style="color:#6b7280;font-size:10px;margin-top:2px;">P-N番号なし</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom expandable table -->
+    <div style="background:#fff;border-top:1px solid #e5e7eb;padding:8px 20px;display:flex;align-items:center;gap:10px;font-size:12px;cursor:pointer;">
+      <span style="font-weight:600;color:#111827;">チェック結果</span>
+      <span style="background:#fef2f2;color:#dc2626;padding:1px 8px;border-radius:4px;font-size:10px;font-weight:500;">3 NG</span>
+      <span style="background:#fffbeb;color:#d97706;padding:1px 8px;border-radius:4px;font-size:10px;font-weight:500;">5 WARN</span>
+      <span style="background:#f0fdf4;color:#16a34a;padding:1px 8px;border-radius:4px;font-size:10px;font-weight:500;">135 OK</span>
+      <span style="margin-left:auto;color:#9ca3af;font-size:11px;">▲ 展開</span>
+    </div>
+  </div>
+</div>
+
+<div class="options" style="margin-top:20px;">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">&#10003;</div>
+    <div class="content">
+      <h3>この方向で実装GO</h3>
+      <p>白ベース、セグメントコントロール、図面最大化、フローティング詳細、折りたたみテーブル</p>
+    </div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">&#9998;</div>
+    <div class="content">
+      <h3>もう少し調整したい</h3>
+      <p>ターミナルでフィードバックください</p>
+    </div>
+  </div>
+</div>

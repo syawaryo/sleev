@@ -35,7 +35,7 @@ from .models import (
 BLDG_X_MIN = 0.0
 BLDG_X_MAX = 80_000.0
 BLDG_Y_MIN = 0.0
-BLDG_Y_MAX = 34_000.0
+BLDG_Y_MAX = 38_000.0
 
 # Search radius (mm) for associating label / FL texts with sleeve centers.
 _LABEL_SEARCH_RADIUS = 1_500.0
@@ -555,6 +555,12 @@ def _extract_dim_lines(doc, msp) -> list[DimLine]:
             except Exception:
                 defpoint3 = (0.0, 0.0)
 
+            angle: float | None = None
+            try:
+                angle = entity.dxf.get("angle", None)
+            except Exception:
+                pass
+
             text_override: str | None = None
             try:
                 txt = entity.dxf.text
@@ -576,6 +582,7 @@ def _extract_dim_lines(doc, msp) -> list[DimLine]:
                     defpoint1=defpoint1,
                     defpoint2=defpoint2,
                     defpoint3=defpoint3,
+                    angle=float(angle) if angle is not None else None,
                     text_override=text_override,
                 )
             )

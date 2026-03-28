@@ -1,23 +1,31 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { FloorData, CheckResult } from "../types";
 
 interface Props {
   floorData: FloorData;
   results: CheckResult[];
   filter: "all" | "NG" | "WARNING" | "OK";
+  onNavigate?: (coords: [number, number], sleeveId?: string, relatedCoords?: [number, number][]) => void;
 }
 
-interface SleeveRow {
-  id: string;
-  pn: string;
-  diameter: number;
-  fl: string;
-  discipline: string;
-  label: string;
-  worst: "NG" | "WARNING" | "OK";
-  ngItems: string[];
-  warnItems: string[];
-}
+// Check definitions with display names
+const CHECK_DEFS: { id: number; name: string }[] = [
+  { id: 2, name: "スリーブ用途・設備種別" },
+  { id: 3, name: "呼び口径・外径記載" },
+  { id: 4, name: "通り芯寸法合計" },
+  { id: 5, name: "勾配確保" },
+  { id: 6, name: "下階壁干渉" },
+  { id: 7, name: "段差スラブ近接" },
+  { id: 8, name: "基準レベル記載" },
+  { id: 9, name: "両側寸法" },
+  { id: 10, name: "段差基準寸法" },
+  { id: 11, name: "スリーブ芯寸法" },
+  { id: 12, name: "柱面・仕上面寸法" },
+  { id: 13, name: "寸法表記統一" },
+  { id: 14, name: "スリーブNo記載" },
+];
+
+const SEVERITY_ORDER = { NG: 0, WARNING: 1, OK: 2 };
 
 const BADGE: Record<string, { bg: string; color: string; border: string }> = {
   NG: { bg: "#fef2f2", color: "#dc2626", border: "#fecaca" },
@@ -25,94 +33,203 @@ const BADGE: Record<string, { bg: string; color: string; border: string }> = {
   OK: { bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0" },
 };
 
-const ROW_BG: Record<string, string> = {
-  NG: "#fef2f2",
-  WARNING: "#fffbeb",
-  OK: "transparent",
-};
+function Badge({ severity }: { severity: string }) {
+  const b = BADGE[severity] || BADGE.OK;
+  return (
+    <span style={{
+      background: b.bg, color: b.color, border: `1px solid ${b.border}`,
+      padding: "1px 6px", borderRadius: 3, fontSize: 10, fontWeight: 600,
+    }}>{severity}</span>
+  );
+}
 
-export default function ListView({ floorData, results, filter }: Props) {
-  const rows = useMemo(() => {
-    const map = new Map<string, SleeveRow>();
-    for (const s of floorData.sleeves) {
-      map.set(s.id, {
-        id: s.id,
-        pn: s.pn_number || "-",
-        diameter: s.diameter,
-        fl: s.fl_text || "-",
-        discipline: s.discipline,
-        label: s.label_text || "-",
+export default function ListView({ floorData, results, filter, onNavigate }: Props) {
+  const [openChecks, setOpenChecks] = useState<Set<number>>(new Set());
+
+  const toggleCheck = (id: number) => {
+    setOpenChecks(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Group results by check_id
+  const checkGroups = useMemo(() => {
+    const groups = new Map<number, {
+      checkId: number;
+      checkName: string;
+      results: CheckResult[];
+      worst: "NG" | "WARNING" | "OK";
+      ngCount: number;
+      warnCount: number;
+      okCount: number;
+    }>();
+
+    for (const def of CHECK_DEFS) {
+      groups.set(def.id, {
+        checkId: def.id,
+        checkName: def.name,
+        results: [],
         worst: "OK",
-        ngItems: [],
-        warnItems: [],
+        ngCount: 0,
+        warnCount: 0,
+        okCount: 0,
       });
     }
+
     for (const r of results) {
-      if (!r.sleeve_id) continue;
-      const row = map.get(r.sleeve_id);
-      if (!row) continue;
+      let group = groups.get(r.check_id);
+      if (!group) {
+        group = {
+          checkId: r.check_id,
+          checkName: r.check_name,
+          results: [],
+          worst: "OK",
+          ngCount: 0,
+          warnCount: 0,
+          okCount: 0,
+        };
+        groups.set(r.check_id, group);
+      }
+      group.results.push(r);
       if (r.severity === "NG") {
-        row.ngItems.push(`#${r.check_id} ${r.message}`);
-        row.worst = "NG";
+        group.ngCount++;
+        group.worst = "NG";
       } else if (r.severity === "WARNING") {
-        row.warnItems.push(`#${r.check_id} ${r.message}`);
-        if (row.worst !== "NG") row.worst = "WARNING";
+        group.warnCount++;
+        if (group.worst !== "NG") group.worst = "WARNING";
+      } else {
+        group.okCount++;
       }
     }
-    const arr = Array.from(map.values());
-    // Sort: NG first, then WARNING, then OK
-    arr.sort((a, b) => {
-      const order = { NG: 0, WARNING: 1, OK: 2 };
-      return order[a.worst] - order[b.worst];
-    });
-    return arr;
-  }, [floorData, results]);
 
-  const filtered = filter === "all" ? rows : rows.filter((r) => r.worst === filter);
+    // Sort results within each group: NG first
+    for (const group of groups.values()) {
+      group.results.sort((a, b) =>
+        SEVERITY_ORDER[a.severity as keyof typeof SEVERITY_ORDER] -
+        SEVERITY_ORDER[b.severity as keyof typeof SEVERITY_ORDER]
+      );
+    }
+
+    return Array.from(groups.values()).sort((a, b) =>
+      SEVERITY_ORDER[a.worst] - SEVERITY_ORDER[b.worst]
+    );
+  }, [results]);
+
+  const filtered = filter === "all"
+    ? checkGroups
+    : checkGroups.filter(g => g.worst === filter);
+
+  // Find sleeve name for a result
+  const sleeveMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of floorData.sleeves) {
+      map.set(s.id, s.pn_number || s.id);
+    }
+    return map;
+  }, [floorData.sleeves]);
+
+  // Find coordinates for navigation
+  const getCoords = (r: CheckResult): [number, number] | null => {
+    if (r.related_coords && r.related_coords.length > 0) {
+      return r.related_coords[0] as [number, number];
+    }
+    if (r.sleeve_id) {
+      const s = floorData.sleeves.find(s => s.id === r.sleeve_id);
+      if (s) return s.center;
+    }
+    return null;
+  };
 
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-      <thead>
-        <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb", color: "#6b7280", fontSize: 10, textAlign: "left" }}>
-          <th style={{ padding: "8px 16px" }}>スリーブ</th>
-          <th style={{ padding: "8px" }}>径</th>
-          <th style={{ padding: "8px" }}>FL</th>
-          <th style={{ padding: "8px" }}>種別</th>
-          <th style={{ padding: "8px" }}>設備</th>
-          <th style={{ padding: "8px", width: 60 }}>判定</th>
-          <th style={{ padding: "8px" }}>指摘事項</th>
-        </tr>
-      </thead>
-      <tbody>
-        {filtered.map((row) => {
-          const badge = BADGE[row.worst];
-          const issues = [...row.ngItems, ...row.warnItems];
-          return (
-            <tr key={row.id} style={{ borderBottom: "1px solid #f3f4f6", background: ROW_BG[row.worst] }}>
-              <td style={{ padding: "8px 16px", fontWeight: 600, color: "#111827" }}>{row.pn}</td>
-              <td style={{ padding: 8, color: "#374151" }}>{row.diameter}mm</td>
-              <td style={{ padding: 8, color: "#374151" }}>{row.fl}</td>
-              <td style={{ padding: 8, color: "#374151", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</td>
-              <td style={{ padding: 8, color: "#374151" }}>{row.discipline}</td>
-              <td style={{ padding: 8 }}>
-                <span style={{
-                  background: badge.bg, color: badge.color, border: `1px solid ${badge.border}`,
-                  padding: "1px 6px", borderRadius: 3, fontSize: 10, fontWeight: 600,
-                }}>{row.worst}</span>
-              </td>
-              <td style={{ padding: 8, fontSize: 10 }}>
-                {issues.length > 0 ? (
-                  <span style={{ color: row.worst === "NG" ? "#dc2626" : "#d97706" }}>
-                    {issues.join(", ")}
-                  </span>
-                ) : (
-                  <span style={{ color: "#9ca3af" }}>-</span>
+    <div style={{ padding: "0 0 20px 0" }}>
+      {filtered.map(group => {
+        const isOpen = openChecks.has(group.checkId);
+        const nonOkResults = group.results.filter(r => r.severity !== "OK");
+        const displayResults = isOpen ? nonOkResults : [];
+
+        return (
+          <div key={group.checkId} style={{ borderBottom: "1px solid #e5e7eb" }}>
+            {/* Check header — toggle */}
+            <div
+              onClick={() => toggleCheck(group.checkId)}
+              style={{
+                padding: "10px 16px",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                cursor: "pointer",
+                background: isOpen ? "#f9fafb" : "transparent",
+                userSelect: "none",
+              }}
+            >
+              <span style={{ color: "#9ca3af", fontSize: 11, width: 16 }}>
+                {isOpen ? "▾" : "▸"}
+              </span>
+              <span style={{ fontWeight: 600, fontSize: 12, color: "#111827", flex: 1 }}>
+                #{group.checkId} {group.checkName}
+              </span>
+              <Badge severity={group.worst} />
+              <div style={{ display: "flex", gap: 4, fontSize: 10 }}>
+                {group.ngCount > 0 && (
+                  <span style={{ color: "#dc2626" }}>{group.ngCount} NG</span>
                 )}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+                {group.warnCount > 0 && (
+                  <span style={{ color: "#d97706" }}>{group.warnCount} WARN</span>
+                )}
+                <span style={{ color: "#9ca3af" }}>{group.okCount} OK</span>
+              </div>
+            </div>
+
+            {/* Expanded results */}
+            {isOpen && (
+              <div style={{ padding: "0 16px 10px 42px" }}>
+                {nonOkResults.length === 0 ? (
+                  <div style={{ color: "#9ca3af", fontSize: 11, padding: "4px 0" }}>
+                    全て OK
+                  </div>
+                ) : (
+                  nonOkResults.map((r, i) => {
+                    const coords = getCoords(r);
+                    const sleeveName = r.sleeve_id ? sleeveMap.get(r.sleeve_id) : null;
+                    return (
+                      <div
+                        key={i}
+                        onClick={() => coords && onNavigate?.(
+                          coords,
+                          r.sleeve_id ?? undefined,
+                          (r.related_coords as [number, number][]) || [],
+                        )}
+                        style={{
+                          padding: "6px 10px",
+                          marginBottom: 3,
+                          borderRadius: 4,
+                          background: r.severity === "NG" ? "#fef2f2" : "#fffbeb",
+                          borderLeft: `3px solid ${r.severity === "NG" ? "#ef4444" : "#fbbf24"}`,
+                          cursor: coords ? "pointer" : "default",
+                          fontSize: 11,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <Badge severity={r.severity} />
+                          {sleeveName && (
+                            <span style={{ fontWeight: 600, color: "#374151" }}>{sleeveName}</span>
+                          )}
+                        </div>
+                        <div style={{ color: "#6b7280", marginTop: 3, fontSize: 11 }}>
+                          {r.message}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }

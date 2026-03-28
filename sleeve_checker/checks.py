@@ -521,12 +521,25 @@ def check_dim_sum(
                     related_coords=coords,
                 ))
 
+    def _is_horizontal(d: DimLine) -> bool | None:
+        """Determine if dim is horizontal, vertical, or unknown."""
+        if d.angle is not None:
+            norm = d.angle % 360
+            if norm < 45 or norm > 315 or (135 < norm < 225):
+                return True
+            return False
+        dx = abs(d.defpoint2[0] - d.defpoint3[0])
+        dy = abs(d.defpoint2[1] - d.defpoint3[1])
+        if dx == 0 and dy == 0:
+            return None
+        return dx > dy
+
     # --- Horizontal dims (measure X span, grouped by dim-line Y position) ---
     h_dims: dict[float, list[DimLine]] = defaultdict(list)
     for d in dims:
-        dx = abs(d.defpoint2[0] - d.defpoint3[0])
-        dy = abs(d.defpoint2[1] - d.defpoint3[1])
-        if dx > dy and d.measurement > 10:
+        if d.measurement <= 10:
+            continue
+        if _is_horizontal(d) is True:
             y_bin = round(d.defpoint1[1] / GROUP_BIN) * GROUP_BIN
             h_dims[y_bin].append(d)
 
@@ -542,9 +555,9 @@ def check_dim_sum(
     # --- Vertical dims (measure Y span, grouped by dim-line X position) ---
     v_dims: dict[float, list[DimLine]] = defaultdict(list)
     for d in dims:
-        dx = abs(d.defpoint2[0] - d.defpoint3[0])
-        dy = abs(d.defpoint2[1] - d.defpoint3[1])
-        if dy > dx and d.measurement > 10:
+        if d.measurement <= 10:
+            continue
+        if _is_horizontal(d) is False:
             x_bin = round(d.defpoint1[0] / GROUP_BIN) * GROUP_BIN
             v_dims[x_bin].append(d)
 

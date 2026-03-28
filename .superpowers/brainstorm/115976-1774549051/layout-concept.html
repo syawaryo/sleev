@@ -1,0 +1,105 @@
+<h2>スリーブチェッカー UI リデザイン</h2>
+<p class="subtitle">白ベース + 全階一括アップロード + 使いやすいレイアウト</p>
+
+<div class="section">
+  <h3>まず確認：全体レイアウト</h3>
+  <p class="subtitle">図面ビューと情報パネルの配置</p>
+</div>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#f8fafc;padding:12px;border-radius:8px;font-size:11px;color:#334155;">
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+          <b>スリーブチェッカー</b>
+          <span style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:10px;">1F</span>
+          <span style="background:#3b82f6;color:#fff;padding:2px 8px;border-radius:4px;font-size:10px;">2F</span>
+          <span style="margin-left:auto;font-size:10px;">NG:3 WARN:5 OK:135</span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <div style="flex:1;background:#fff;border:1px solid #e2e8f0;border-radius:6px;min-height:200px;display:flex;align-items:center;justify-content:center;">
+            <div style="text-align:center;">
+              <div style="color:#94a3b8;font-size:20px;">図面ビュー</div>
+              <div style="color:#cbd5e1;font-size:9px;">ズーム・パン可能</div>
+            </div>
+          </div>
+          <div style="width:200px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;">
+            <div style="font-size:10px;color:#64748b;margin-bottom:4px;">スリーブ詳細</div>
+            <div style="background:#f8fafc;padding:4px;border-radius:4px;font-size:9px;margin-bottom:3px;">P-N-85 | 175mm</div>
+            <div style="background:#f8fafc;padding:4px;border-radius:4px;font-size:9px;margin-bottom:3px;">FL: -225</div>
+            <div style="background:#fef2f2;padding:4px;border-radius:4px;font-size:9px;color:#dc2626;">#8 FL記載なし</div>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-top:6px;font-size:9px;">
+          チェック結果テーブル（下部）
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A: 右パネル型</h3>
+      <p>図面の右にスリーブ詳細パネル。下にテーブル。現状ベースの改善版。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#f8fafc;padding:12px;border-radius:8px;font-size:11px;color:#334155;">
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+          <b>スリーブチェッカー</b>
+          <span style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:10px;">1F</span>
+          <span style="background:#3b82f6;color:#fff;padding:2px 8px;border-radius:4px;font-size:10px;">2F</span>
+        </div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;min-height:180px;display:flex;align-items:center;justify-content:center;">
+          <div style="text-align:center;">
+            <div style="color:#94a3b8;font-size:20px;">図面ビュー（フル幅）</div>
+            <div style="color:#cbd5e1;font-size:9px;">ホバーでツールチップ表示</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <div style="flex:1;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;">
+            <div style="font-size:10px;color:#64748b;margin-bottom:4px;">選択中: P-N-85</div>
+            <div style="display:flex;gap:4px;font-size:9px;">
+              <div style="flex:1;background:#f8fafc;padding:4px;border-radius:4px;">175mm | FL-225</div>
+              <div style="flex:1;background:#fef2f2;padding:4px;border-radius:4px;color:#dc2626;">#8 FL記載なし</div>
+            </div>
+          </div>
+          <div style="flex:1;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;font-size:9px;">
+            チェック結果一覧
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B: フル幅図面 + 下部分割</h3>
+      <p>図面をフル幅で表示。詳細とテーブルは下部で横並び。図面を最大限広く見せる。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#f8fafc;padding:12px;border-radius:8px;font-size:11px;color:#334155;">
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+          <b>スリーブチェッカー</b>
+          <div style="margin-left:auto;display:flex;gap:4px;">
+            <span style="background:#3b82f6;color:#fff;padding:2px 8px;border-radius:4px;font-size:10px;">図面</span>
+            <span style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:10px;">一覧</span>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;min-height:220px;position:relative;">
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;">
+            <div style="color:#94a3b8;font-size:20px;">図面ビュー（最大化）</div>
+          </div>
+          <div style="position:absolute;bottom:8px;right:8px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:6px;width:160px;font-size:9px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+            <div style="font-weight:bold;margin-bottom:2px;">P-N-85</div>
+            <div>175mm | FL-225 | 衛生</div>
+            <div style="color:#dc2626;margin-top:2px;">#8 FL記載なし</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C: 図面最大化 + フローティング</h3>
+      <p>図面を画面いっぱいに。詳細はフローティングカードで右下に。一覧は別タブ。</p>
+    </div>
+  </div>
+</div>

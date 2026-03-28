@@ -1,0 +1,92 @@
+<h2>タブのスタイル比較</h2>
+<p class="subtitle">図面種別・階数の切替UI</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#fff;padding:20px;">
+      <!-- A: アンダーライン型 -->
+      <div style="border-bottom:1px solid #e2e8f0;display:flex;gap:0;font-size:13px;">
+        <span style="padding:8px 16px;border-bottom:2px solid #2563eb;color:#2563eb;font-weight:500;">スリーブ</span>
+        <span style="padding:8px 16px;color:#94a3b8;">電気</span>
+        <span style="padding:8px 16px;color:#94a3b8;">衛生配管</span>
+        <span style="padding:8px 16px;color:#94a3b8;">空調配管</span>
+        <span style="padding:8px 16px;color:#94a3b8;">空調ダクト</span>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:4px;">
+        <span style="padding:4px 14px;font-size:12px;color:#94a3b8;">1F</span>
+        <span style="padding:4px 14px;font-size:12px;border-bottom:2px solid #1e293b;color:#1e293b;font-weight:500;">2F</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A: アンダーライン</h3>
+      <p>Google/Material風。シンプル、よくあるパターン。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#fff;padding:20px;">
+      <!-- B: セグメントコントロール -->
+      <div style="display:inline-flex;background:#f1f5f9;border-radius:8px;padding:3px;gap:2px;font-size:12px;">
+        <span style="padding:6px 14px;background:#fff;border-radius:6px;color:#1e293b;font-weight:500;box-shadow:0 1px 3px rgba(0,0,0,0.08);">スリーブ</span>
+        <span style="padding:6px 14px;border-radius:6px;color:#64748b;">電気</span>
+        <span style="padding:6px 14px;border-radius:6px;color:#64748b;">衛生配管</span>
+        <span style="padding:6px 14px;border-radius:6px;color:#64748b;">空調配管</span>
+        <span style="padding:6px 14px;border-radius:6px;color:#64748b;">空調ダクト</span>
+      </div>
+      <div style="margin-top:12px;display:inline-flex;background:#f1f5f9;border-radius:6px;padding:2px;gap:2px;font-size:12px;">
+        <span style="padding:4px 16px;border-radius:4px;color:#64748b;">1F</span>
+        <span style="padding:4px 16px;background:#1e293b;border-radius:4px;color:#fff;font-weight:500;">2F</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B: セグメントコントロール</h3>
+      <p>iOS/Apple風。角丸ピル型。今のに近いけどもっと洗練。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#fff;padding:20px;">
+      <!-- C: チップ型 -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px;">
+        <span style="padding:5px 14px;background:#eff6ff;color:#2563eb;border-radius:20px;font-weight:500;border:1px solid #bfdbfe;">スリーブ</span>
+        <span style="padding:5px 14px;background:#fff;color:#64748b;border-radius:20px;border:1px solid #e2e8f0;">電気</span>
+        <span style="padding:5px 14px;background:#fff;color:#64748b;border-radius:20px;border:1px solid #e2e8f0;">衛生配管</span>
+        <span style="padding:5px 14px;background:#fff;color:#64748b;border-radius:20px;border:1px solid #e2e8f0;">空調配管</span>
+        <span style="padding:5px 14px;background:#fff;color:#64748b;border-radius:20px;border:1px solid #e2e8f0;">空調ダクト</span>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:6px;font-size:12px;">
+        <span style="padding:4px 16px;background:#fff;color:#64748b;border-radius:20px;border:1px solid #e2e8f0;">1F</span>
+        <span style="padding:4px 16px;background:#1e293b;color:#fff;border-radius:20px;font-weight:500;">2F</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C: チップ/ピル</h3>
+      <p>丸みのあるチップ。カジュアルで軽い印象。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="d" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#fff;padding:20px;">
+      <!-- D: ドロップダウン + 階数ボタン -->
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:11px;color:#94a3b8;">図面:</span>
+          <select style="padding:5px 28px 5px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;color:#1e293b;background:#fff;appearance:auto;">
+            <option>スリーブ</option>
+          </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:11px;color:#94a3b8;">階:</span>
+          <div style="display:flex;gap:1px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
+            <span style="padding:5px 14px;font-size:12px;color:#64748b;background:#fff;">1F</span>
+            <span style="padding:5px 14px;font-size:12px;color:#fff;background:#1e293b;font-weight:500;">2F</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>D: ドロップダウン + ボタン</h3>
+      <p>種別はドロップダウン、階数はコンパクトなボタン。ヘッダーが狭くて済む。</p>
+    </div>
+  </div>
+</div>
