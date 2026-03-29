@@ -8,7 +8,6 @@ interface Props {
   onNavigate?: (coords: [number, number], sleeveId?: string, relatedCoords?: [number, number][]) => void;
 }
 
-// Check definitions with display names
 const CHECK_DEFS: { id: number; name: string }[] = [
   { id: 2, name: "スリーブ用途・設備種別" },
   { id: 3, name: "呼び口径・外径記載" },
@@ -25,23 +24,7 @@ const CHECK_DEFS: { id: number; name: string }[] = [
   { id: 14, name: "スリーブNo記載" },
 ];
 
-const SEVERITY_ORDER = { NG: 0, WARNING: 1, OK: 2 };
-
-const BADGE: Record<string, { bg: string; color: string; border: string }> = {
-  NG: { bg: "#fef2f2", color: "#dc2626", border: "#fecaca" },
-  WARNING: { bg: "#fffbeb", color: "#d97706", border: "#fde68a" },
-  OK: { bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0" },
-};
-
-function Badge({ severity }: { severity: string }) {
-  const b = BADGE[severity] || BADGE.OK;
-  return (
-    <span style={{
-      background: b.bg, color: b.color, border: `1px solid ${b.border}`,
-      padding: "1px 6px", borderRadius: 3, fontSize: 10, fontWeight: 600,
-    }}>{severity}</span>
-  );
-}
+const SEV_ORDER = { NG: 0, WARNING: 1, OK: 2 };
 
 export default function ListView({ floorData, results, filter, onNavigate }: Props) {
   const [openChecks, setOpenChecks] = useState<Set<number>>(new Set());
@@ -49,181 +32,104 @@ export default function ListView({ floorData, results, filter, onNavigate }: Pro
   const toggleCheck = (id: number) => {
     setOpenChecks(prev => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
 
-  // Group results by check_id
   const checkGroups = useMemo(() => {
     const groups = new Map<number, {
-      checkId: number;
-      checkName: string;
-      results: CheckResult[];
-      worst: "NG" | "WARNING" | "OK";
-      ngCount: number;
-      warnCount: number;
-      okCount: number;
+      checkId: number; checkName: string; results: CheckResult[];
+      worst: "NG" | "WARNING" | "OK"; ngCount: number; warnCount: number; okCount: number;
     }>();
-
     for (const def of CHECK_DEFS) {
-      groups.set(def.id, {
-        checkId: def.id,
-        checkName: def.name,
-        results: [],
-        worst: "OK",
-        ngCount: 0,
-        warnCount: 0,
-        okCount: 0,
-      });
+      groups.set(def.id, { checkId: def.id, checkName: def.name, results: [], worst: "OK", ngCount: 0, warnCount: 0, okCount: 0 });
     }
-
     for (const r of results) {
-      let group = groups.get(r.check_id);
-      if (!group) {
-        group = {
-          checkId: r.check_id,
-          checkName: r.check_name,
-          results: [],
-          worst: "OK",
-          ngCount: 0,
-          warnCount: 0,
-          okCount: 0,
-        };
-        groups.set(r.check_id, group);
-      }
-      group.results.push(r);
-      if (r.severity === "NG") {
-        group.ngCount++;
-        group.worst = "NG";
-      } else if (r.severity === "WARNING") {
-        group.warnCount++;
-        if (group.worst !== "NG") group.worst = "WARNING";
-      } else {
-        group.okCount++;
-      }
+      let g = groups.get(r.check_id);
+      if (!g) { g = { checkId: r.check_id, checkName: r.check_name, results: [], worst: "OK", ngCount: 0, warnCount: 0, okCount: 0 }; groups.set(r.check_id, g); }
+      g.results.push(r);
+      if (r.severity === "NG") { g.ngCount++; g.worst = "NG"; }
+      else if (r.severity === "WARNING") { g.warnCount++; if (g.worst !== "NG") g.worst = "WARNING"; }
+      else g.okCount++;
     }
-
-    // Sort results within each group: NG first
-    for (const group of groups.values()) {
-      group.results.sort((a, b) =>
-        SEVERITY_ORDER[a.severity as keyof typeof SEVERITY_ORDER] -
-        SEVERITY_ORDER[b.severity as keyof typeof SEVERITY_ORDER]
-      );
-    }
-
-    return Array.from(groups.values()).sort((a, b) =>
-      SEVERITY_ORDER[a.worst] - SEVERITY_ORDER[b.worst]
-    );
+    for (const g of groups.values()) g.results.sort((a, b) => SEV_ORDER[a.severity as keyof typeof SEV_ORDER] - SEV_ORDER[b.severity as keyof typeof SEV_ORDER]);
+    return Array.from(groups.values()).sort((a, b) => SEV_ORDER[a.worst] - SEV_ORDER[b.worst]);
   }, [results]);
 
-  const filtered = filter === "all"
-    ? checkGroups
-    : checkGroups.filter(g => g.worst === filter);
+  const filtered = filter === "all" ? checkGroups : checkGroups.filter(g => g.worst === filter);
 
-  // Find sleeve name for a result
   const sleeveMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of floorData.sleeves) {
-      map.set(s.id, s.pn_number || s.id);
-    }
-    return map;
+    const m = new Map<string, string>();
+    for (const s of floorData.sleeves) m.set(s.id, s.pn_number || s.id);
+    return m;
   }, [floorData.sleeves]);
 
-  // Find coordinates for navigation
   const getCoords = (r: CheckResult): [number, number] | null => {
-    if (r.related_coords && r.related_coords.length > 0) {
-      return r.related_coords[0] as [number, number];
-    }
-    if (r.sleeve_id) {
-      const s = floorData.sleeves.find(s => s.id === r.sleeve_id);
-      if (s) return s.center;
-    }
+    if (r.related_coords?.length) return r.related_coords[0] as [number, number];
+    if (r.sleeve_id) { const s = floorData.sleeves.find(s => s.id === r.sleeve_id); if (s) return s.center; }
     return null;
   };
 
+  const sevColor = (s: string) => s === "NG" ? "#dc2626" : s === "WARNING" ? "#d97706" : "#16a34a";
+
   return (
-    <div style={{ padding: "0 0 20px 0" }}>
+    <div style={{ background: "#ffffff" }}>
       {filtered.map(group => {
         const isOpen = openChecks.has(group.checkId);
-        const nonOkResults = group.results.filter(r => r.severity !== "OK");
-        const displayResults = isOpen ? nonOkResults : [];
+        const nonOk = group.results.filter(r => r.severity !== "OK");
+        const hasSleeveCol = nonOk.some(r => r.sleeve_id);
 
         return (
-          <div key={group.checkId} style={{ borderBottom: "1px solid #e5e7eb" }}>
-            {/* Check header — toggle */}
+          <div key={group.checkId}>
             <div
               onClick={() => toggleCheck(group.checkId)}
               style={{
-                padding: "10px 16px",
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                cursor: "pointer",
-                background: isOpen ? "#f9fafb" : "transparent",
-                userSelect: "none",
+                padding: "10px 20px", display: "flex", alignItems: "center", gap: 12,
+                cursor: "pointer", borderBottom: "1px solid #e5e7eb", background: "#ffffff",
               }}
             >
-              <span style={{ color: "#9ca3af", fontSize: 11, width: 16 }}>
-                {isOpen ? "▾" : "▸"}
+              <span style={{ color: "#374151", fontSize: 12 }}>{isOpen ? "▾" : "▸"}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: sevColor(group.worst) }}>
+                #{group.checkId}
               </span>
-              <span style={{ fontWeight: 600, fontSize: 12, color: "#111827", flex: 1 }}>
-                #{group.checkId} {group.checkName}
+              <span style={{ fontSize: 13, fontWeight: 500, color: "#111827", flex: 1 }}>
+                {group.checkName}
               </span>
-              <Badge severity={group.worst} />
-              <div style={{ display: "flex", gap: 4, fontSize: 10 }}>
-                {group.ngCount > 0 && (
-                  <span style={{ color: "#dc2626" }}>{group.ngCount} NG</span>
-                )}
-                {group.warnCount > 0 && (
-                  <span style={{ color: "#d97706" }}>{group.warnCount} WARN</span>
-                )}
-                <span style={{ color: "#9ca3af" }}>{group.okCount} OK</span>
-              </div>
+              {group.ngCount > 0 && <span style={{ fontSize: 13, fontWeight: 600, color: "#dc2626" }}>{group.ngCount} NG</span>}
+              {group.warnCount > 0 && <span style={{ fontSize: 13, fontWeight: 600, color: "#d97706" }}>{group.warnCount} WARN</span>}
+              <span style={{ fontSize: 13, color: "#6b7280" }}>{group.okCount} OK</span>
             </div>
 
-            {/* Expanded results */}
             {isOpen && (
-              <div style={{ padding: "0 16px 10px 42px" }}>
-                {nonOkResults.length === 0 ? (
-                  <div style={{ color: "#9ca3af", fontSize: 11, padding: "4px 0" }}>
-                    全て OK
-                  </div>
+              <div style={{ borderBottom: "1px solid #e5e7eb", background: "#ffffff" }}>
+                {nonOk.length === 0 ? (
+                  <div style={{ padding: "10px 20px", fontSize: 13, color: "#6b7280" }}>全て OK</div>
                 ) : (
-                  nonOkResults.map((r, i) => {
-                    const coords = getCoords(r);
-                    const sleeveName = r.sleeve_id ? sleeveMap.get(r.sleeve_id) : null;
-                    return (
-                      <div
-                        key={i}
-                        onClick={() => coords && onNavigate?.(
-                          coords,
-                          r.sleeve_id ?? undefined,
-                          (r.related_coords as [number, number][]) || [],
-                        )}
-                        style={{
-                          padding: "6px 10px",
-                          marginBottom: 3,
-                          borderRadius: 4,
-                          background: r.severity === "NG" ? "#fef2f2" : "#fffbeb",
-                          borderLeft: `3px solid ${r.severity === "NG" ? "#ef4444" : "#fbbf24"}`,
-                          cursor: coords ? "pointer" : "default",
-                          fontSize: 11,
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <Badge severity={r.severity} />
-                          {sleeveName && (
-                            <span style={{ fontWeight: 600, color: "#374151" }}>{sleeveName}</span>
-                          )}
-                        </div>
-                        <div style={{ color: "#6b7280", marginTop: 3, fontSize: 11 }}>
-                          {r.message}
-                        </div>
-                      </div>
-                    );
-                  })
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <tbody>
+                      {nonOk.map((r, i) => {
+                        const coords = getCoords(r);
+                        const name = r.sleeve_id ? sleeveMap.get(r.sleeve_id) : null;
+                        return (
+                          <tr
+                            key={i}
+                            onClick={() => coords && onNavigate?.(coords, r.sleeve_id ?? undefined, (r.related_coords as [number, number][]) || [])}
+                            style={{ borderBottom: "1px solid #e5e7eb", cursor: coords ? "pointer" : "default" }}
+                          >
+                            {hasSleeveCol && (
+                              <td style={{ padding: "8px 12px 8px 32px", width: 300, fontSize: 13, fontWeight: 500, color: "#111827" }}>
+                                {name || "-"}
+                              </td>
+                            )}
+                            <td style={{ padding: "8px 12px" + (!hasSleeveCol ? " 8px 32px" : ""), fontSize: 13, color: "#111827" }}>
+                              {r.message}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 )}
               </div>
             )}

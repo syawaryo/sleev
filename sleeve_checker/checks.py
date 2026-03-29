@@ -489,8 +489,17 @@ def check_dim_sum(
             if d_start > GRID_SNAP or d_end > GRID_SNAP:
                 continue
 
-            coords = [(chain_start, ch[0].defpoint1[1 if axis == "X" else 0]),
-                       (chain_end, ch[-1].defpoint1[1 if axis == "X" else 0])]
+            if axis == "X":
+                # Horizontal chain: coords are (x_start, y_dimline), (x_end, y_dimline)
+                coords = [(chain_start, ch[0].defpoint1[1]),
+                           (chain_end, ch[-1].defpoint1[1])]
+            else:
+                # Vertical chain: coords are (x_dimline, y_start), (x_dimline, y_end)
+                coords = [(ch[0].defpoint1[0], chain_start),
+                           (ch[-1].defpoint1[0], chain_end)]
+
+            # Build breakdown: each dim value listed, then sum vs grid
+            dim_vals = " + ".join(f"{d.measurement:.0f}" for d in ch)
 
             if abs(chain_sum - grid_span) <= SUM_TOLERANCE:
                 results.append(CheckResult(
@@ -499,9 +508,10 @@ def check_dim_sum(
                     severity="OK",
                     sleeve=None,
                     message=(
-                        f"通り芯 {g_start.axis_label}–{g_end.axis_label} ({axis}): "
-                        f"{len(ch)}本の寸法合計 {chain_sum:.0f} = "
-                        f"通り芯間 {grid_span:.0f}mm"
+                        f"通り芯 {g_start.axis_label}–{g_end.axis_label} ({axis}) | "
+                        f"寸法: {dim_vals} | "
+                        f"合計: {chain_sum:.0f} | "
+                        f"通り芯間: {grid_span:.0f}"
                     ),
                     related_coords=coords,
                 ))
@@ -513,10 +523,11 @@ def check_dim_sum(
                     severity="NG",
                     sleeve=None,
                     message=(
-                        f"通り芯 {g_start.axis_label}–{g_end.axis_label} ({axis}): "
-                        f"{len(ch)}本の寸法合計 {chain_sum:.0f} ≠ "
-                        f"通り芯間 {grid_span:.0f}mm "
-                        f"（差 {diff:+.0f}mm）"
+                        f"通り芯 {g_start.axis_label}–{g_end.axis_label} ({axis}) | "
+                        f"寸法: {dim_vals} | "
+                        f"合計: {chain_sum:.0f} | "
+                        f"通り芯間: {grid_span:.0f} | "
+                        f"差: {diff:+.0f}mm"
                     ),
                     related_coords=coords,
                 ))
