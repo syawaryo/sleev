@@ -21,7 +21,7 @@ from sleeve_checker.models import (
     WallLine,
 )
 from sleeve_checker.checks import (
-    check_both_sides,
+    check_position_determinacy,
     check_column_wall_dim,
     check_diameter_label,
     check_dim_notation,
@@ -449,37 +449,73 @@ class TestCheckDimSum:
 
 
 # ---------------------------------------------------------------------------
-# #9 check_both_sides
+# #9 check_position_determinacy
 # ---------------------------------------------------------------------------
 
-class TestCheckBothSides:
-    def test_ok_both_sides(self):
-        # Sleeve at x=500; V grids at 0 and 1000
-        s = _make_sleeve(center=(500, 500))
+class TestCheckPositionDeterminacy:
+    def test_ok_grid_to_sleeve_both_axes(self):
+        # Sleeve at (500, 500); grids at x=0 (V) and y=0 (H)
+        s = _make_sleeve(id="s1", center=(500, 500))
         grids = [
             GridLine(axis_label="A", direction="V", position=0),
-            GridLine(axis_label="B", direction="V", position=1000),
+            GridLine(axis_label="1", direction="H", position=0),
         ]
-        # Dim from x=0 (grid A) to sleeve and from sleeve to x=1000 (grid B)
+        # Horizontal dim: grid x=0 → sleeve x=500
+        # Vertical dim: grid y=0 → sleeve y=500
         dims = [
-            DimLine(layer="t", measurement=500.0, defpoint1=(0, 500), defpoint2=(500, 500)),
-            DimLine(layer="t", measurement=500.0, defpoint1=(500, 500), defpoint2=(1000, 500)),
+            DimLine(layer="t", measurement=500.0, defpoint1=(250, 600),
+                    defpoint2=(0, 500), defpoint3=(500, 500), angle=0),
+            DimLine(layer="t", measurement=500.0, defpoint1=(600, 250),
+                    defpoint2=(500, 0), defpoint3=(500, 500), angle=90),
         ]
-        results = check_both_sides(s, dims, grids, tolerance=10.0)
-        ok_results = [r for r in results if r.severity == "OK"]
-        assert len(ok_results) >= 1
+        results = check_position_determinacy([s], dims, grids, sleeve_margin=50.0, grid_tolerance=10.0)
+        assert len(results) == 1
+        assert results[0].severity == "OK"
 
-    def test_ok_no_dims(self):
-        s = _make_sleeve(center=(500, 500))
-        grids = [GridLine(axis_label="A", direction="V", position=0)]
-        results = check_both_sides(s, [], grids, tolerance=10.0)
-        # No dims → skip → OK
+    def test_ng_missing_y(self):
+        # Only X dim, no Y dim
+        s = _make_sleeve(id="s1", center=(500, 500))
+        grids = [
+            GridLine(axis_label="A", direction="V", position=0),
+            GridLine(axis_label="1", direction="H", position=0),
+        ]
+        dims = [
+            DimLine(layer="t", measurement=500.0, defpoint1=(250, 600),
+                    defpoint2=(0, 500), defpoint3=(500, 500), angle=0),
+        ]
+        results = check_position_determinacy([s], dims, grids, sleeve_margin=50.0, grid_tolerance=10.0)
+        assert results[0].severity == "NG"
+        assert "Y" in results[0].message
+
+    def test_ok_chain_via_inter_sleeve(self):
+        # s1 has grid dim, s2 linked to s1 via inter-sleeve dim
+        s1 = _make_sleeve(id="s1", center=(500, 500))
+        s2 = _make_sleeve(id="s2", center=(1000, 500))
+        grids = [
+            GridLine(axis_label="A", direction="V", position=0),
+            GridLine(axis_label="1", direction="H", position=0),
+        ]
+        dims = [
+            # s1: grid→sleeve X
+            DimLine(layer="t", measurement=500.0, defpoint1=(250, 600),
+                    defpoint2=(0, 500), defpoint3=(500, 500), angle=0),
+            # s1: grid→sleeve Y
+            DimLine(layer="t", measurement=500.0, defpoint1=(600, 250),
+                    defpoint2=(500, 0), defpoint3=(500, 500), angle=90),
+            # s1↔s2 inter-sleeve X
+            DimLine(layer="t", measurement=500.0, defpoint1=(750, 600),
+                    defpoint2=(500, 500), defpoint3=(1000, 500), angle=0),
+            # s2: grid→sleeve Y
+            DimLine(layer="t", measurement=500.0, defpoint1=(1100, 250),
+                    defpoint2=(1000, 0), defpoint3=(1000, 500), angle=90),
+        ]
+        results = check_position_determinacy([s1, s2], dims, grids, sleeve_margin=50.0, grid_tolerance=10.0)
         assert all(r.severity == "OK" for r in results)
 
     def test_ok_no_grids(self):
-        s = _make_sleeve(center=(500, 500))
+        s = _make_sleeve(id="s1", center=(500, 500))
         dims = [DimLine(layer="t", measurement=500.0, defpoint1=(0, 500), defpoint2=(500, 500))]
-        results = check_both_sides(s, dims, [], tolerance=10.0)
+        results = check_position_determinacy([s], dims, [])
         assert all(r.severity == "OK" for r in results)
 
 

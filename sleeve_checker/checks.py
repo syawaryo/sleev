@@ -432,7 +432,7 @@ def check_column_wall_dim(
             severity="NG",
             sleeve=None,
             message=f"寸法基点が柱・壁仕上線上にあります: {dim.defpoint1}",
-            related_coords=[dim.defpoint1, dim.defpoint2],
+            related_coords=[dim.defpoint1],
         )]
     return [CheckResult(
         check_id=12,
@@ -633,130 +633,180 @@ def check_dim_sum(
 
 
 # ---------------------------------------------------------------------------
-# #9 check_both_sides
+# #9 check_position_determinacy
 # ---------------------------------------------------------------------------
 
-_SEARCH_RADIUS = 1500.0
 
-
-def check_both_sides(
-    sleeve: Sleeve,
+def check_position_determinacy(
+    sleeves: list[Sleeve],
     dims: list[DimLine],
     grids: list[GridLine],
-    tolerance: float = 100.0,
+    sleeve_margin: float = 30.0,
+    grid_tolerance: float = 100.0,
 ) -> list[CheckResult]:
+    """Check #9: each sleeve's position must be determinable from dimensions.
+
+    For each axis (X via V-grids, Y via H-grids), a sleeve is "resolved" if:
+      - a dimension directly links it to a grid line, OR
+      - a dimension links it to another sleeve that is already resolved.
+
+    Algorithm (per axis):
+    1. Build edges: dim connects sleeve↔grid or sleeve↔sleeve.
+    2. Mark sleeves with a direct grid dim as resolved.
+    3. Propagate through sleeve↔sleeve dims (BFS).
+    4. Unresolved sleeves → NG.
+
+    The sleeve match tolerance is ``sleeve.diameter / 2 + sleeve_margin``
+    because dimension extension lines often originate from the sleeve edge
+    rather than the centre.
     """
-    Check #9: For each sleeve, there must be dimension lines referencing grid
-    lines on BOTH sides (left+right for X axis, top+bottom for Y axis).
+    if not sleeves:
+        return []
 
-    Strategy:
-    1. Collect dims within _SEARCH_RADIUS of the sleeve centre.
-    2. For each dim, check if its defpoints match any grid position.
-    3. Classify matched grids as left/right (V grids) or top/bottom (H grids).
-    4. If only one side covered in either axis → NG.
-    """
-    cx, cy = sleeve.center
+    v_grid_positions = [g.position for g in grids if g.direction == "V"]
+    h_grid_positions = [g.position for g in grids if g.direction == "H"]
 
-    # Nearby dims
-    nearby = [
-        d for d in dims
-        if (
-            abs(d.defpoint1[0] - cx) <= _SEARCH_RADIUS
-            and abs(d.defpoint1[1] - cy) <= _SEARCH_RADIUS
-        ) or (
-            abs(d.defpoint2[0] - cx) <= _SEARCH_RADIUS
-            and abs(d.defpoint2[1] - cy) <= _SEARCH_RADIUS
-        )
-    ]
+    def _near_any_grid(val: float, grid_positions: list[float]) -> bool:
+        return any(abs(val - gp) <= grid_tolerance for gp in grid_positions)
 
-    if not nearby:
-        # No dims near this sleeve → cannot verify
-        return [CheckResult(
-            check_id=9,
-            check_name="両側寸法",
-            severity="OK",
-            sleeve=sleeve,
-            message="近傍寸法なし（スキップ）",
-        )]
+    def _match_sleeves(pt: tuple[float, float], axis: str) -> list[Sleeve]:
+        """Return *all* sleeves whose coordinate on *axis* matches *pt*.
 
-    v_grids = [g for g in grids if g.direction == "V"]
-    h_grids = [g for g in grids if g.direction == "H"]
+        For a vertical dim (axis="Y"), any sleeve whose Y is within
+        ``diameter/2 + margin`` of ``pt[1]`` is a match — regardless of X.
+        This correctly handles drawings where the dim extension-line origin
+        is horizontally offset from the sleeve centre.
+        """
+        idx = 0 if axis == "X" else 1
+        matched: list[Sleeve] = []
+        for s in sleeves:
+            tol = s.diameter / 2.0 + sleeve_margin
+            if abs(pt[idx] - s.center[idx]) <= tol:
+                matched.append(s)
+        return matched
 
-    # Collect grid positions referenced by nearby dims
-    left_refs: list[float] = []   # V grid X < cx
-    right_refs: list[float] = []  # V grid X > cx
-    bottom_refs: list[float] = []  # H grid Y < cy
-    top_refs: list[float] = []    # H grid Y > cy
+    def _is_horizontal(d: DimLine) -> bool | None:
+        if d.angle is not None:
+            norm = d.angle % 360
+            if norm < 45 or norm > 315 or (135 < norm < 225):
+                return True
+            return False
+        dx = abs(d.defpoint2[0] - d.defpoint3[0])
+        dy = abs(d.defpoint2[1] - d.defpoint3[1])
+        if dx == 0 and dy == 0:
+            return None
+        return dx > dy
 
-    for dim in nearby:
-        for pt in (dim.defpoint1, dim.defpoint2):
-            # Match against V grids
-            for g in v_grids:
-                if abs(pt[0] - g.position) <= tolerance:
-                    if g.position < cx:
-                        left_refs.append(g.position)
-                    elif g.position > cx:
-                        right_refs.append(g.position)
-            # Match against H grids
-            for g in h_grids:
-                if abs(pt[1] - g.position) <= tolerance:
-                    if g.position < cy:
-                        bottom_refs.append(g.position)
-                    elif g.position > cy:
-                        top_refs.append(g.position)
+    def _resolve_axis(
+        axis: str,
+        grid_positions: list[float],
+    ) -> dict[str, bool]:
+        """Return {sleeve.id: resolved} for one axis.
+
+        Resolution propagates through:
+        1. Same-axis dims (horizontal dims for X, vertical dims for Y):
+           sleeve↔grid → resolved; sleeve↔sleeve → BFS edge.
+        2. Cross-axis dims (vertical dims for X, horizontal dims for Y):
+           sleeve↔sleeve edges only.  A vertical dim chain proves the
+           connected sleeves share the same X coordinate, so if one has
+           X resolved the others do too (and vice-versa for Y).
+        """
+        resolved: dict[str, bool] = {s.id: False for s in sleeves}
+        sleeve_edges: dict[str, list[str]] = {s.id: [] for s in sleeves}
+
+        is_x = axis == "X"
+        cross_axis = "Y" if is_x else "X"
+
+        for d in dims:
+            h = _is_horizontal(d)
+            dp2, dp3 = d.defpoint2, d.defpoint3
+
+            same_axis = (is_x and h is True) or (not is_x and h is False)
+            cross = (is_x and h is False) or (not is_x and h is True)
+
+            if same_axis:
+                # Same-axis: sleeve↔grid resolves, sleeve↔sleeve builds edge
+                ss2 = _match_sleeves(dp2, axis)
+                ss3 = _match_sleeves(dp3, axis)
+
+                g2 = _near_any_grid(dp2[0] if is_x else dp2[1], grid_positions)
+                g3 = _near_any_grid(dp3[0] if is_x else dp3[1], grid_positions)
+
+                if g3:
+                    for s in ss2:
+                        resolved[s.id] = True
+                if g2:
+                    for s in ss3:
+                        resolved[s.id] = True
+
+                # sleeve ↔ sleeve edges between all pairs
+                for s2 in ss2:
+                    for s3 in ss3:
+                        if s2.id != s3.id:
+                            sleeve_edges[s2.id].append(s3.id)
+                            sleeve_edges[s3.id].append(s2.id)
+
+            elif cross:
+                # Cross-axis: a horizontal dim connects sleeves that share Y;
+                # a vertical dim connects sleeves that share X.
+                # Match using the dim's own measurement axis (horizontal→X,
+                # vertical→Y) so that the perpendicular offset doesn't break
+                # the match.
+                dim_axis = "X" if h else "Y"
+                ss2 = _match_sleeves(dp2, dim_axis)
+                ss3 = _match_sleeves(dp3, dim_axis)
+
+                for s2 in ss2:
+                    for s3 in ss3:
+                        if s2.id != s3.id:
+                            sleeve_edges[s2.id].append(s3.id)
+                            sleeve_edges[s3.id].append(s2.id)
+
+        # BFS propagation
+        queue = [sid for sid, r in resolved.items() if r]
+        visited = set(queue)
+        while queue:
+            current = queue.pop(0)
+            for neighbor in sleeve_edges[current]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    resolved[neighbor] = True
+                    queue.append(neighbor)
+
+        return resolved
 
     results: list[CheckResult] = []
+    sleeve_map = {s.id: s for s in sleeves}
 
-    # Check X axis (need both left and right)
-    if v_grids:
-        if left_refs and right_refs:
+    x_resolved = _resolve_axis("X", v_grid_positions) if v_grid_positions else None
+    y_resolved = _resolve_axis("Y", h_grid_positions) if h_grid_positions else None
+
+    for s in sleeves:
+        x_ok = x_resolved[s.id] if x_resolved is not None else True
+        y_ok = y_resolved[s.id] if y_resolved is not None else True
+
+        if x_ok and y_ok:
             results.append(CheckResult(
                 check_id=9,
-                check_name="両側寸法",
+                check_name="位置特定寸法",
                 severity="OK",
-                sleeve=sleeve,
-                message="X軸両側の通芯寸法あり",
+                sleeve=s,
+                message="X・Y方向とも位置特定可能",
             ))
-        elif left_refs or right_refs:
-            side = "左" if left_refs else "右"
+        else:
+            missing = []
+            if not x_ok:
+                missing.append("X")
+            if not y_ok:
+                missing.append("Y")
             results.append(CheckResult(
                 check_id=9,
-                check_name="両側寸法",
+                check_name="位置特定寸法",
                 severity="NG",
-                sleeve=sleeve,
-                message=f"X軸片側（{side}側）のみ通芯寸法あり",
-                related_coords=[sleeve.center],
+                sleeve=s,
+                message=f"{'・'.join(missing)}方向の位置が寸法から特定できません",
+                related_coords=[s.center],
             ))
-
-    # Check Y axis (need both top and bottom)
-    if h_grids:
-        if bottom_refs and top_refs:
-            results.append(CheckResult(
-                check_id=9,
-                check_name="両側寸法",
-                severity="OK",
-                sleeve=sleeve,
-                message="Y軸両側の通芯寸法あり",
-            ))
-        elif bottom_refs or top_refs:
-            side = "下" if bottom_refs else "上"
-            results.append(CheckResult(
-                check_id=9,
-                check_name="両側寸法",
-                severity="NG",
-                sleeve=sleeve,
-                message=f"Y軸片側（{side}側）のみ通芯寸法あり",
-                related_coords=[sleeve.center],
-            ))
-
-    if not results:
-        results.append(CheckResult(
-            check_id=9,
-            check_name="両側寸法",
-            severity="OK",
-            sleeve=sleeve,
-            message="通芯グリッドなし（スキップ）",
-        ))
 
     return results
 
@@ -885,8 +935,9 @@ def run_all_checks(
         results.extend(check_sleeve_center_dim(dim, floor_2f.sleeves))         # #11
         results.extend(check_column_wall_dim(dim, floor_2f.column_lines))      # #12
 
-    # --- Per-sleeve both-sides check ---
-    for sleeve in floor_2f.sleeves:
-        results.extend(check_both_sides(sleeve, floor_2f.dim_lines, floor_2f.grid_lines))  # #9
+    # --- Position determinacy (graph-based) ---
+    results.extend(check_position_determinacy(
+        floor_2f.sleeves, floor_2f.dim_lines, floor_2f.grid_lines,
+    ))  # #9
 
     return results

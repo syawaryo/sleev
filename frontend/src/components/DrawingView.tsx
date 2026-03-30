@@ -8,7 +8,7 @@ interface Props {
   onSleeveHover: (sleeve: Sleeve | null) => void;
   onSleeveClick: (sleeve: Sleeve | null) => void;
   selectedSleeveId: string | null;
-  layers: { grid: boolean; wall: boolean; step: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean };
+  layers: { grid: boolean; wall: boolean; step: boolean; column: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean };
   colorMode: "severity" | "fl" | "discipline";
   navigateTarget?: [number, number] | null;
   onNavigated?: () => void;
@@ -182,6 +182,12 @@ export default function DrawingView({
         {layers.step && floorData.step_lines.map((s, i) => (
           <line key={`s${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
             stroke="#d97706" strokeWidth={25} opacity={0.8} />
+        ))}
+
+        {/* Column / wall-finish lines */}
+        {layers.column && floorData.column_lines.map((c, i) => (
+          <line key={`col${i}`} x1={c.start[0]} y1={c.start[1]} x2={c.end[0]} y2={c.end[1]}
+            stroke="#7c3aed" strokeWidth={20} opacity={0.6} />
         ))}
 
         {/* Dimension lines: defpoint2 → defpoint3 = measured span */}

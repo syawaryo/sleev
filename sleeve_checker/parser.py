@@ -474,7 +474,7 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
     Extract RC column outlines (F102_RC柱), S column outlines (F201_Ｓ柱),
     and wall finish lines (A521_壁：仕上) as ColumnLine objects.
     """
-    col_keywords = ["F102_RC柱", "F101_RC柱", "F201_Ｓ柱", "F201_S柱"]
+    col_keywords = ["F102_RC柱", "F101_RC柱", "F201_Ｓ柱", "F201_S柱", "A521_壁：仕上", "A521_壁:仕上"]
     col_layers = _find_layers_any(doc, col_keywords)
 
     col_lines: list[ColumnLine] = []
@@ -557,7 +557,14 @@ def _extract_dim_lines(doc, msp) -> list[DimLine]:
 
             angle: float | None = None
             try:
-                angle = entity.dxf.get("angle", None)
+                raw_angle = entity.dxf.get("angle", None)
+                if raw_angle is not None:
+                    angle = float(raw_angle)
+                else:
+                    # DXF spec: missing angle on linear dim means 0 (horizontal)
+                    dim_base_type = entity.dxf.get("dimtype", 0) & 0x0F
+                    if dim_base_type == 0:
+                        angle = 0.0
             except Exception:
                 pass
 

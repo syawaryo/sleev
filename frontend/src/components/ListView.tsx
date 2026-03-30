@@ -16,7 +16,7 @@ const CHECK_DEFS: { id: number; name: string }[] = [
   { id: 6, name: "下階壁干渉" },
   { id: 7, name: "段差スラブ近接" },
   { id: 8, name: "基準レベル記載" },
-  { id: 9, name: "両側寸法" },
+  { id: 9, name: "位置特定寸法" },
   { id: 10, name: "段差基準寸法" },
   { id: 11, name: "スリーブ芯寸法" },
   { id: 12, name: "柱面・仕上面寸法" },
@@ -77,9 +77,6 @@ export default function ListView({ floorData, results, filter, onNavigate }: Pro
     <div style={{ background: "#ffffff" }}>
       {filtered.map(group => {
         const isOpen = openChecks.has(group.checkId);
-        const nonOk = group.results.filter(r => r.severity !== "OK");
-        const hasSleeveCol = nonOk.some(r => r.sleeve_id);
-
         return (
           <div key={group.checkId}>
             <div
@@ -103,34 +100,39 @@ export default function ListView({ floorData, results, filter, onNavigate }: Pro
 
             {isOpen && (
               <div style={{ borderBottom: "1px solid #e5e7eb", background: "#ffffff" }}>
-                {nonOk.length === 0 ? (
-                  <div style={{ padding: "10px 20px", fontSize: 13, color: "#6b7280" }}>全て OK</div>
-                ) : (
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <tbody>
-                      {nonOk.map((r, i) => {
-                        const coords = getCoords(r);
-                        const name = r.sleeve_id ? sleeveMap.get(r.sleeve_id) : null;
-                        return (
-                          <tr
-                            key={i}
-                            onClick={() => coords && onNavigate?.(coords, r.sleeve_id ?? undefined, (r.related_coords as [number, number][]) || [])}
-                            style={{ borderBottom: "1px solid #e5e7eb", cursor: coords ? "pointer" : "default" }}
-                          >
-                            {hasSleeveCol && (
-                              <td style={{ padding: "8px 12px 8px 32px", width: 300, fontSize: 13, fontWeight: 500, color: "#111827" }}>
-                                {name || "-"}
+                {(() => {
+                  const nonOk = group.results.filter(r => r.severity !== "OK");
+                  const hasSleeveCol = nonOk.some(r => r.sleeve_id);
+                  if (nonOk.length === 0) {
+                    return <div style={{ padding: "10px 20px", fontSize: 13, color: "#6b7280" }}>全て OK</div>;
+                  }
+                  return (
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <tbody>
+                        {nonOk.map((r, i) => {
+                          const coords = getCoords(r);
+                          const name = r.sleeve_id ? sleeveMap.get(r.sleeve_id) : null;
+                          return (
+                            <tr
+                              key={i}
+                              onClick={() => coords && onNavigate?.(coords, r.sleeve_id ?? undefined, (r.related_coords as [number, number][]) || [])}
+                              style={{ borderBottom: "1px solid #e5e7eb", cursor: coords ? "pointer" : "default" }}
+                            >
+                              {hasSleeveCol && (
+                                <td style={{ padding: "8px 12px 8px 32px", width: 300, fontSize: 13, fontWeight: 500, color: "#111827" }}>
+                                  {name || "-"}
+                                </td>
+                              )}
+                              <td style={{ padding: "8px 12px" + (!hasSleeveCol ? " 8px 32px" : ""), fontSize: 13, color: "#111827" }}>
+                                {r.message}
                               </td>
-                            )}
-                            <td style={{ padding: "8px 12px" + (!hasSleeveCol ? " 8px 32px" : ""), fontSize: 13, color: "#111827" }}>
-                              {r.message}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  );
+                })()}
               </div>
             )}
           </div>
