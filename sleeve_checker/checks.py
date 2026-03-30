@@ -299,28 +299,67 @@ def check_step_slab(
 # ---------------------------------------------------------------------------
 
 def check_step_dim(
-    dim: DimLine,
+    sleeve: Sleeve,
+    dims: list[DimLine],
     step_lines: list[StepLine],
-    tolerance: float = 5.0,
+    sleeve_tolerance: float = 50.0,
+    step_tolerance: float = 5.0,
 ) -> list[CheckResult]:
-    """Check #10: dimension defpoint1 must not lie on a step line."""
-    segments = [(s.start, s.end) for s in step_lines]
-    if point_on_any_segment(dim.defpoint1, segments, tolerance):
+    """Check #10: sleeve-related dims must not originate from a step line.
+
+    For each dimension whose defpoint2 or defpoint3 is near the sleeve
+    centre, check whether that sleeve-side defpoint sits on a step line.
+    If so, the dimension is measuring from a step (formwork edge) rather
+    than from a reliable reference — flag as NG.
+    """
+    if not step_lines:
         return [CheckResult(
             check_id=10,
             check_name="段差基準寸法",
-            severity="NG",
-            sleeve=None,
-            message=f"寸法基点が段差線上にあります: {dim.defpoint1}",
-            related_coords=[dim.defpoint1, dim.defpoint2],
+            severity="OK",
+            sleeve=sleeve,
+            message="段差線なし（スキップ）",
         )]
-    return [CheckResult(
-        check_id=10,
-        check_name="段差基準寸法",
-        severity="OK",
-        sleeve=None,
-        message="段差線上の寸法基点なし",
-    )]
+
+    step_segs = [(s.start, s.end) for s in step_lines]
+    results: list[CheckResult] = []
+
+    for dim in dims:
+        # Find which defpoint(s) match the sleeve centre
+        dp2_match = points_match(dim.defpoint2, sleeve.center, sleeve_tolerance)
+        dp3_match = points_match(dim.defpoint3, sleeve.center, sleeve_tolerance)
+
+        if not dp2_match and not dp3_match:
+            continue
+
+        # Check the sleeve-side defpoint(s) against step lines
+        sleeve_pts = []
+        if dp2_match:
+            sleeve_pts.append(dim.defpoint2)
+        if dp3_match:
+            sleeve_pts.append(dim.defpoint3)
+
+        for pt in sleeve_pts:
+            if point_on_any_segment(pt, step_segs, step_tolerance):
+                results.append(CheckResult(
+                    check_id=10,
+                    check_name="段差基準寸法",
+                    severity="NG",
+                    sleeve=sleeve,
+                    message=f"スリーブ寸法の基点が段差線上: {pt}",
+                    related_coords=[pt, sleeve.center],
+                ))
+
+    if not results:
+        results.append(CheckResult(
+            check_id=10,
+            check_name="段差基準寸法",
+            severity="OK",
+            sleeve=sleeve,
+            message="段差線上の寸法基点なし",
+        ))
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -837,9 +876,12 @@ def run_all_checks(
     results.extend(check_dim_sum(floor_2f.dim_lines, floor_2f.grid_lines))   # #4
     results.extend(check_dim_notation(floor_2f.dim_lines))                    # #13
 
+    # --- Per-sleeve dim checks ---
+    for sleeve in floor_2f.sleeves:
+        results.extend(check_step_dim(sleeve, floor_2f.dim_lines, floor_2f.step_lines))  # #10
+
     # --- Per-dim checks ---
     for dim in floor_2f.dim_lines:
-        results.extend(check_step_dim(dim, floor_2f.step_lines))               # #10
         results.extend(check_sleeve_center_dim(dim, floor_2f.sleeves))         # #11
         results.extend(check_column_wall_dim(dim, floor_2f.column_lines))      # #12
 

@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
 *.dwg
-dxf_output/
+# dxf_output/ — included for demo
 .env
+node_modules/
+frontend/dist/
+static/

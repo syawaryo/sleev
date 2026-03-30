@@ -307,28 +307,32 @@ class TestCheckStepSlab:
 # ---------------------------------------------------------------------------
 
 class TestCheckStepDim:
-    def _make_dim(self, dp1, dp2):
-        return DimLine(layer="test", measurement=500.0, defpoint1=dp1, defpoint2=dp2)
+    def _make_dim(self, dp1, dp2, dp3=None):
+        return DimLine(layer="test", measurement=500.0, defpoint1=dp1, defpoint2=dp2,
+                       defpoint3=dp3 if dp3 else (0.0, 0.0))
 
     def _make_step(self, start, end):
         return StepLine(start=start, end=end)
 
     def test_ok_not_on_step(self):
-        dim = self._make_dim((0, 0), (500, 0))
+        sleeve = _make_sleeve(id="s1", center=(500, 0))
+        dim = self._make_dim((0, 100), (0, 0), (500, 0))  # dp3 near sleeve, not on step
         step = self._make_step((1000, -500), (1000, 500))
-        r = _first(check_step_dim(dim, [step]))
+        r = _first(check_step_dim(sleeve, [dim], [step]))
         assert r.severity == "OK"
 
     def test_ng_on_step(self):
-        # defpoint1=(500, 0) lies on step from (500, -500) to (500, 500)
-        dim = self._make_dim((500, 0), (1000, 0))
+        # dp2=(500, 0) matches sleeve centre AND lies on step line
+        sleeve = _make_sleeve(id="s1", center=(500, 0))
+        dim = self._make_dim((0, 100), (500, 0), (0, 0))  # dp2 near sleeve, on step
         step = self._make_step((500, -500), (500, 500))
-        r = _first(check_step_dim(dim, [step]))
+        r = _first(check_step_dim(sleeve, [dim], [step]))
         assert r.severity == "NG"
 
     def test_ok_no_steps(self):
-        dim = self._make_dim((0, 0), (500, 0))
-        r = _first(check_step_dim(dim, []))
+        sleeve = _make_sleeve(id="s1", center=(500, 0))
+        dim = self._make_dim((0, 100), (500, 0), (0, 0))
+        r = _first(check_step_dim(sleeve, [dim], []))
         assert r.severity == "OK"
 
 

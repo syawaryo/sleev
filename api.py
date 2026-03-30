@@ -14,6 +14,8 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from sleeve_checker.checks import run_all_checks
@@ -28,7 +30,12 @@ app = FastAPI(title="Sleeve Checker API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        os.getenv("FRONTEND_URL", ""),
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -205,3 +212,21 @@ def run_checks(request: CheckRequest) -> dict:
             summary[key] += 1
 
     return {"results": results_list, "summary": summary}
+
+
+# ---------------------------------------------------------------------------
+# Serve frontend static files in production
+# ---------------------------------------------------------------------------
+
+_static_dir = Path(__file__).parent / "static"
+
+if _static_dir.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_static_dir / "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    def serve_spa(full_path: str):
+        """Fallback: serve index.html for any non-API route (SPA routing)."""
+        file = _static_dir / full_path
+        if file.is_file():
+            return FileResponse(str(file))
+        return FileResponse(str(_static_dir / "index.html"))
