@@ -8,6 +8,14 @@ export async function getFloors(): Promise<{id: string; name: string; path: stri
   return res.data;
 }
 
+export async function uploadDxf(file: File, label: string): Promise<{id: string; name: string; label: string; path: string}> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("label", label);
+  const res = await axios.post(`${BASE}/upload`, form);
+  return res.data;
+}
+
 export async function parseFloor(floorId: string): Promise<FloorData> {
   const res = await axios.post(`${BASE}/parse`, { floor_id: floorId });
   return res.data;

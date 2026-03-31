@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -174,6 +174,36 @@ def list_floors() -> list[dict]:
             }
         )
     return floors
+
+
+@app.post("/api/upload")
+async def upload_dxf(file: UploadFile = File(...), label: str = Form("")):
+    """Upload a DXF file and return its floor entry."""
+    if not file.filename or not file.filename.lower().endswith(".dxf"):
+        raise HTTPException(status_code=400, detail="DXF file required")
+
+    DXF_DIR.mkdir(exist_ok=True)
+    stem = Path(file.filename).stem
+    dest = DXF_DIR / file.filename
+    content = await file.read()
+    dest.write_bytes(content)
+
+    floor_id = _FLOOR_ID_MAP.get(stem, stem)
+    # Register in maps so it can be resolved by floor_id
+    if stem not in _FLOOR_ID_MAP:
+        _FLOOR_ID_MAP[stem] = floor_id
+        _ID_TO_STEM[floor_id] = stem
+
+    # Clear cache for this file if it was previously parsed
+    key = str(dest.resolve())
+    _parse_cache.pop(key, None)
+
+    return {
+        "id": floor_id,
+        "name": stem,
+        "label": label or stem,
+        "path": str(dest).replace("\\", "/"),
+    }
 
 
 @app.post("/api/parse")

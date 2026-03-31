@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import type { FloorData, Sleeve, CheckResult } from "./types";
-import { parseFloor, runChecks } from "./api";
+import { getFloors, parseFloor, runChecks, uploadDxf } from "./api";
 import DrawingView from "./components/DrawingView";
 import SleeveInfo from "./components/SleeveInfo";
 import ListView from "./components/ListView";
@@ -16,10 +16,7 @@ interface FloorEntry {
 }
 
 function App() {
-  const [floors, setFloors] = useState<FloorEntry[]>([
-    { id: "2f", label: "2F", data: null, results: [] },
-    { id: "1f", label: "1F", data: null, results: [] },
-  ]);
+  const [floors, setFloors] = useState<FloorEntry[]>([]);
   const [activeFloorIdx, setActiveFloorIdx] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("drawing");
   const [colorMode, setColorMode] = useState<ColorMode>("severity");
@@ -32,11 +29,12 @@ function App() {
   const [layers, setLayers] = useState({
     grid: true, wall: true, step: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false,
   });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggleLayer = (key: keyof typeof layers) =>
     setLayers((p) => ({ ...p, [key]: !p[key] }));
 
-  const activeFloor = floors[activeFloorIdx];
+  const activeFloor = floors[activeFloorIdx] || { id: "", label: "", data: null, results: [] };
   const floorData = activeFloor.data;
   const results = activeFloor.results;
   const displaySleeve = hoveredSleeve || selectedSleeve;
@@ -44,22 +42,79 @@ function App() {
   // Find 1F data for wall interference overlay
   const floor1fData = floors.find((f) => f.id === "1f")?.data ?? null;
 
-  const handleRun = async () => {
+  // Load existing floors on mount
+  useEffect(() => {
+    getFloors().then((serverFloors) => {
+      if (serverFloors.length > 0) {
+        setFloors(serverFloors.map((f) => ({
+          id: f.id,
+          label: f.name,
+          data: null,
+          results: [],
+        })));
+      }
+    }).catch(() => {});
+  }, []);
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
     setLoading(true);
     try {
-      const [data2f, data1f] = await Promise.all([parseFloor("2f"), parseFloor("1f")]);
-      const [check2f, check1f] = await Promise.all([
-        runChecks("2f", "1f"),
-        runChecks("1f"),
-      ]);
-      setFloors([
-        { id: "2f", label: "2F", data: data2f, results: check2f.results },
-        { id: "1f", label: "1F", data: data1f, results: check1f.results },
-      ]);
+      for (const file of Array.from(files)) {
+        const res = await uploadDxf(file, "");
+        setFloors((prev) => {
+          const exists = prev.findIndex((f) => f.id === res.id);
+          if (exists >= 0) {
+            const next = [...prev];
+            next[exists] = { id: res.id, label: res.name, data: null, results: [] };
+            return next;
+          }
+          return [...prev, { id: res.id, label: res.name, data: null, results: [] }];
+        });
+      }
     } catch (e) {
       console.error(e);
     }
     setLoading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleRun = async () => {
+    if (floors.length === 0) return;
+    setLoading(true);
+    try {
+      // Parse all floors
+      const parsed = await Promise.all(floors.map((f) => parseFloor(f.id)));
+
+      // Find floor pairs: for each floor, find the one below it for wall check
+      // Simple heuristic: if there's a "1f" floor, use it as lower for "2f"
+      const floor1fId = floors.find((f) => f.id === "1f")?.id ?? null;
+
+      const checked = await Promise.all(
+        floors.map((f) => {
+          const lower = f.id !== "1f" && floor1fId ? floor1fId : undefined;
+          return runChecks(f.id, lower);
+        })
+      );
+
+      setFloors(
+        floors.map((f, i) => ({
+          ...f,
+          data: parsed[i],
+          results: checked[i].results,
+        }))
+      );
+    } catch (e) {
+      console.error(e);
+    }
+    setLoading(false);
+  };
+
+  const handleRemoveFloor = (idx: number) => {
+    setFloors((prev) => prev.filter((_, i) => i !== idx));
+    if (activeFloorIdx >= floors.length - 1) {
+      setActiveFloorIdx(Math.max(0, floors.length - 2));
+    }
   };
 
   // Sleeve-level summary
@@ -82,6 +137,8 @@ function App() {
     return { total: floorData.sleeves.length, ng, warning: warn, ok };
   }, [floorData, results]);
 
+  const hasData = floors.some((f) => f.data !== null);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#f8fafc", color: "#111827", fontFamily: "'Inter', 'Noto Sans JP', -apple-system, sans-serif" }}>
       {/* Row 1: Header */}
@@ -102,14 +159,14 @@ function App() {
           ))}
         </div>
 
-        {!floorData && (
+        {floors.length > 0 && (
           <button onClick={handleRun} disabled={loading}
             style={{
               padding: "5px 16px", background: loading ? "#d1d5db" : "#ff4b4b",
               color: "#fff", border: "none", borderRadius: 6, cursor: loading ? "default" : "pointer",
               fontSize: 12, fontWeight: 500, marginLeft: 8,
             }}>
-            {loading ? "解析中..." : "チェック実行"}
+            {loading ? "解析中..." : hasData ? "再チェック" : "チェック実行"}
           </button>
         )}
 
@@ -127,20 +184,33 @@ function App() {
       {/* Row 2: Floor tabs + controls */}
       <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "6px 20px", display: "flex", alignItems: "center", gap: 10 }}>
         {/* Floor segment */}
-        <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 7, padding: 2, gap: 2, fontSize: 12 }}>
-          {floors.map((f, i) => (
-            <button key={f.id}
-              onClick={() => { setActiveFloorIdx(i); setSelectedSleeve(null); setHoveredSleeve(null); }}
-              style={{
-                padding: "4px 16px", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12,
-                fontWeight: activeFloorIdx === i ? 500 : 400,
-                background: activeFloorIdx === i ? "#fff" : "transparent",
-                color: activeFloorIdx === i ? "#111827" : "#9ca3af",
-                boxShadow: activeFloorIdx === i ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
-              }}>{f.label}</button>
-          ))}
-        </div>
-        <button style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
+        {floors.length > 0 && (
+          <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 7, padding: 2, gap: 2, fontSize: 12 }}>
+            {floors.map((f, i) => (
+              <div key={f.id} style={{ display: "inline-flex", alignItems: "center" }}>
+                <button
+                  onClick={() => { setActiveFloorIdx(i); setSelectedSleeve(null); setHoveredSleeve(null); }}
+                  style={{
+                    padding: "4px 16px", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12,
+                    fontWeight: activeFloorIdx === i ? 500 : 400,
+                    background: activeFloorIdx === i ? "#fff" : "transparent",
+                    color: activeFloorIdx === i ? "#111827" : "#9ca3af",
+                    boxShadow: activeFloorIdx === i ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+                  }}>{f.label}</button>
+                {!f.data && (
+                  <button onClick={(e) => { e.stopPropagation(); handleRemoveFloor(i); }}
+                    style={{ background: "none", border: "none", color: "#d1d5db", cursor: "pointer", fontSize: 10, padding: "0 4px", lineHeight: 1 }}
+                    title="削除">x</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <input ref={fileInputRef} type="file" accept=".dxf" multiple style={{ display: "none" }}
+          onChange={(e) => handleUpload(e.target.files)} />
+        <button onClick={() => fileInputRef.current?.click()} disabled={loading}
+          style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
           + DXF追加
         </button>
 
@@ -232,7 +302,20 @@ function App() {
 
       {/* Main content */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
-        {viewMode === "drawing" ? (
+        {floors.length === 0 ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, color: "#9ca3af" }}>
+            <div style={{ fontSize: 14 }}>DXFファイルをアップロードしてください</div>
+            <input ref={fileInputRef} type="file" accept=".dxf" multiple style={{ display: "none" }}
+              onChange={(e) => handleUpload(e.target.files)} />
+            <button onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: "10px 24px", fontSize: 13, background: "#fff", border: "2px dashed #d1d5db",
+                borderRadius: 8, color: "#6b7280", cursor: "pointer",
+              }}>
+              + DXFファイルを選択
+            </button>
+          </div>
+        ) : viewMode === "drawing" ? (
           <>
             {/* Drawing area */}
             <div style={{ flex: 1, overflow: "hidden" }}>
