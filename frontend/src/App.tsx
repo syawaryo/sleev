@@ -18,7 +18,7 @@ interface FloorEntry {
 function App() {
   const [floors, setFloors] = useState<FloorEntry[]>([]);
   const [activeFloorIdx, setActiveFloorIdx] = useState(0);
-  const [viewMode, setViewMode] = useState<ViewMode>("drawing");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [colorMode, setColorMode] = useState<ColorMode>("severity");
   const [loading, setLoading] = useState(false);
   const [hoveredSleeve, setHoveredSleeve] = useState<Sleeve | null>(null);
@@ -149,7 +149,7 @@ function App() {
 
         {/* View toggle */}
         <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 7, padding: 2, gap: 2, fontSize: 12, marginLeft: 12 }}>
-          {([["drawing", "図面"], ["list", "一覧"]] as const).map(([mode, label]) => (
+          {([["list", "一覧"], ["drawing", "図面"]] as const).map(([mode, label]) => (
             <button key={mode} onClick={() => setViewMode(mode)}
               style={{
                 padding: "4px 14px", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: viewMode === mode ? 500 : 400,
