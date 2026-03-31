@@ -181,6 +181,10 @@ function App() {
         )}
       </div>
 
+      {/* Hidden file input (always rendered) */}
+      <input ref={fileInputRef} type="file" accept=".dxf" multiple style={{ display: "none" }}
+        onChange={(e) => handleUpload(e.target.files)} />
+
       {/* Row 2: Floor tabs + controls */}
       <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "6px 20px", display: "flex", alignItems: "center", gap: 10 }}>
         {/* Floor segment */}
@@ -207,8 +211,6 @@ function App() {
           </div>
         )}
 
-        <input ref={fileInputRef} type="file" accept=".dxf" multiple style={{ display: "none" }}
-          onChange={(e) => handleUpload(e.target.files)} />
         <button onClick={() => fileInputRef.current?.click()} disabled={loading}
           style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
           + DXF追加
@@ -305,8 +307,6 @@ function App() {
         {floors.length === 0 ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, color: "#9ca3af" }}>
             <div style={{ fontSize: 14 }}>DXFファイルをアップロードしてください</div>
-            <input ref={fileInputRef} type="file" accept=".dxf" multiple style={{ display: "none" }}
-              onChange={(e) => handleUpload(e.target.files)} />
             <button onClick={() => fileInputRef.current?.click()}
               style={{
                 padding: "10px 24px", fontSize: 13, background: "#fff", border: "2px dashed #d1d5db",
