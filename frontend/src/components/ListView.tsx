@@ -1,10 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { FloorData, CheckResult } from "../types";
 
 interface Props {
   floorData: FloorData;
   results: CheckResult[];
   filter: "all" | "NG" | "WARNING" | "OK";
+  openChecks: Set<number>;
+  onOpenChecksChange: (v: Set<number>) => void;
   onNavigate?: (coords: [number, number], sleeveId?: string, relatedCoords?: [number, number][]) => void;
 }
 
@@ -26,15 +28,11 @@ const CHECK_DEFS: { id: number; name: string }[] = [
 
 const SEV_ORDER = { NG: 0, WARNING: 1, OK: 2 };
 
-export default function ListView({ floorData, results, filter, onNavigate }: Props) {
-  const [openChecks, setOpenChecks] = useState<Set<number>>(new Set());
-
+export default function ListView({ floorData, results, filter, openChecks, onOpenChecksChange, onNavigate }: Props) {
   const toggleCheck = (id: number) => {
-    setOpenChecks(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    const next = new Set(openChecks);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onOpenChecksChange(next);
   };
 
   const checkGroups = useMemo(() => {

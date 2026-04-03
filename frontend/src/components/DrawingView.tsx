@@ -68,7 +68,9 @@ export default function DrawingView({
       const sy = (e.clientY - rect.top) / rect.height;
       const ptX = cur.x + sx * cur.w;
       const ptY = cur.y + sy * cur.h;
-      const factor = e.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+      // Scale factor proportional to deltaY for smooth pinch/trackpad zoom
+      const delta = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 100);
+      const factor = 1 + delta * 0.003;
       const newW = Math.min(Math.max(cur.w * factor, MIN_ZOOM_W), MAX_ZOOM_W);
       const newH = Math.min(Math.max(cur.h * factor, MIN_ZOOM_W * 0.5), MAX_ZOOM_W * 0.5);
       const ratio = newW / cur.w;
@@ -105,15 +107,27 @@ export default function DrawingView({
   const handleDoubleClick = useCallback(() => setVb(INITIAL_VB), []);
 
   // Navigate to target coordinates (from list view click)
+  // Zoom to fit all highlight coords with padding
   useEffect(() => {
     if (navigateTarget) {
-      const [tx, ty] = navigateTarget;
-      const zoomW = 15000;
-      const zoomH = 7500;
-      setVb({ x: tx - zoomW / 2, y: -ty - zoomH / 2, w: zoomW, h: zoomH });
+      const pts = highlightCoords && highlightCoords.length > 1 ? highlightCoords : [navigateTarget];
+      const xs = pts.map(p => p[0]);
+      const ys = pts.map(p => p[1]);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const spanX = maxX - minX;
+      const spanY = maxY - minY;
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      // Add generous padding (at least 15000 width, or span + 5000 margin on each side)
+      const zoomW = Math.max(15000, spanX + 10000);
+      const zoomH = Math.max(7500, spanY + 5000);
+      setVb({ x: cx - zoomW / 2, y: -cy - zoomH / 2, w: zoomW, h: zoomH });
       onNavigated?.();
     }
-  }, [navigateTarget, onNavigated]);
+  }, [navigateTarget, onNavigated, highlightCoords]);
 
   const severityMap = useMemo(() => {
     const map = new Map<string, "NG" | "WARNING" | "OK">();

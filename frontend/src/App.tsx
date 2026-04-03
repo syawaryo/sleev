@@ -26,6 +26,7 @@ function App() {
   const [filter, setFilter] = useState<"all" | "NG" | "WARNING" | "OK">("all");
   const [navigateTarget, setNavigateTarget] = useState<[number, number] | null>(null);
   const [highlightCoords, setHighlightCoords] = useState<[number, number][]>([]);
+  const [openChecks, setOpenChecks] = useState<Set<number>>(new Set());
   const [layers, setLayers] = useState({
     grid: true, wall: true, step: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false,
   });
@@ -357,9 +358,15 @@ function App() {
                 floorData={floorData}
                 results={results}
                 filter={filter}
+                openChecks={openChecks}
+                onOpenChecksChange={setOpenChecks}
                 onNavigate={(coords, sleeveId, relatedCoords) => {
                   setViewMode("drawing");
-                  setNavigateTarget(coords);
+                  // Compute bounding center of all related coords so both base points are visible
+                  const allPts = relatedCoords && relatedCoords.length > 1 ? relatedCoords : [coords];
+                  const cx = allPts.reduce((s, p) => s + p[0], 0) / allPts.length;
+                  const cy = allPts.reduce((s, p) => s + p[1], 0) / allPts.length;
+                  setNavigateTarget([cx, cy]);
                   setHighlightCoords(relatedCoords || []);
                   if (sleeveId) {
                     const sleeve = floorData?.sleeves.find(s => s.id === sleeveId);

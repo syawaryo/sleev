@@ -11,6 +11,9 @@ export default function SleeveInfo({ sleeve, results }: Props) {
   const warnResults = sleeveResults.filter((r) => r.severity === "WARNING");
   const okCount = sleeveResults.filter((r) => r.severity === "OK").length;
 
+  // Extract only the leading alphanumeric discipline code from label_text (e.g. "G(低) 225φ" → "G")
+  const disciplineCode = sleeve.label_text?.match(/^[A-Za-z0-9]+/)?.[0] || null;
+
   const worst = ngResults.length > 0 ? "NG" : warnResults.length > 0 ? "WARNING" : "OK";
   const badgeStyle: Record<string, { bg: string; color: string }> = {
     NG: { bg: "#fef2f2", color: "#dc2626" },
@@ -35,7 +38,7 @@ export default function SleeveInfo({ sleeve, results }: Props) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>径</div><div style={{ color: "#111827", fontWeight: 600 }}>{sleeve.diameter}mm</div></div>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>FL</div><div style={{ color: "#111827", fontWeight: 600 }}>{sleeve.fl_text || "-"}</div></div>
-          <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>種別</div><div style={{ color: "#374151" }}>{sleeve.label_text || "-"}</div></div>
+          <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>種別</div><div style={{ color: "#374151" }}>{disciplineCode || "-"}</div></div>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>座標</div><div style={{ color: "#374151", fontSize: 11 }}>({sleeve.center[0].toFixed(0)}, {sleeve.center[1].toFixed(0)})</div></div>
         </div>
       </div>
