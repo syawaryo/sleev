@@ -19,7 +19,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from sleeve_checker.checks import run_all_checks
-from sleeve_checker.models import FloorData
+from sleeve_checker.models import (
+    FloorData, Sleeve, GridLine, DimLine, WallLine, StepLine,
+    ColumnLine, SlabZone, SlabLabel, SlabOutline, PnLabel,
+)
 from sleeve_checker.parser import parse_dxf
 
 # ---------------------------------------------------------------------------
@@ -88,12 +91,106 @@ def _get_floor_path(floor_id: str | None, path: str | None) -> Path:
     )
 
 
+CACHE_DIR = Path(".parse_cache")
+
+
+def _dict_to_floor_data(d: dict) -> FloorData:
+    """Reconstruct FloorData from a JSON-parsed dict."""
+    return FloorData(
+        sleeves=[Sleeve(
+            id=s["id"], center=tuple(s["center"]), diameter=s["diameter"],
+            label_text=s.get("label_text"), fl_text=s.get("fl_text"),
+            pn_number=s.get("pn_number"), layer=s.get("layer", ""),
+            discipline=s.get("discipline", ""),
+        ) for s in d.get("sleeves", [])],
+        grid_lines=[GridLine(
+            axis_label=g["axis_label"], direction=g["direction"], position=g["position"],
+        ) for g in d.get("grid_lines", [])],
+        dim_lines=[DimLine(
+            layer=dl["layer"], measurement=dl["measurement"],
+            defpoint1=tuple(dl["defpoint1"]), defpoint2=tuple(dl["defpoint2"]),
+            defpoint3=tuple(dl.get("defpoint3", [0, 0])),
+            angle=dl.get("angle"), text_override=dl.get("text_override"),
+        ) for dl in d.get("dim_lines", [])],
+        wall_lines=[WallLine(
+            start=tuple(w["start"]), end=tuple(w["end"]),
+            layer=w.get("layer", ""), wall_type=w.get("wall_type", ""),
+        ) for w in d.get("wall_lines", [])],
+        step_lines=[StepLine(
+            start=tuple(s["start"]), end=tuple(s["end"]), layer=s.get("layer", ""),
+        ) for s in d.get("step_lines", [])],
+        column_lines=[ColumnLine(
+            start=tuple(c["start"]), end=tuple(c["end"]), layer=c.get("layer", ""),
+        ) for c in d.get("column_lines", [])],
+        slab_zones=[SlabZone(
+            x=z["x"], y=z["y"], fl_text=z["fl_text"], fl_value=z["fl_value"],
+        ) for z in d.get("slab_zones", [])],
+        slab_outlines=[SlabOutline(
+            start=tuple(o["start"]), end=tuple(o["end"]),
+        ) for o in d.get("slab_outlines", [])],
+        slab_labels=[SlabLabel(
+            x=sl["x"], y=sl["y"], slab_no=sl["slab_no"],
+            level=sl["level"], thickness=sl["thickness"],
+        ) for sl in d.get("slab_labels", [])],
+        pn_labels=[PnLabel(
+            x=p["x"], y=p["y"], text=p["text"], number=p["number"],
+            arrow_verts=[tuple(v) for v in p.get("arrow_verts", [])],
+        ) for p in d.get("pn_labels", [])],
+        slab_level=d.get("slab_level"),
+    )
+
+
+def _cache_path(filepath: Path) -> Path:
+    """Return the JSON cache file path for a given DXF file."""
+    CACHE_DIR.mkdir(exist_ok=True)
+    return CACHE_DIR / (filepath.stem + ".json")
+
+
 def _get_or_parse(filepath: Path) -> FloorData:
-    """Return cached FloorData or parse and cache it."""
+    """Return cached FloorData or parse and cache it.
+
+    Two-tier cache:
+    1. In-memory dict (fastest, lost on restart)
+    2. JSON file on disk (fast, survives restarts)
+    Falls back to full DXF parse if neither cache is valid.
+    """
+    import json
+
     key = str(filepath.resolve())
-    if key not in _parse_cache:
-        _parse_cache[key] = parse_dxf(str(filepath))
-    return _parse_cache[key]
+
+    # Tier 1: in-memory
+    if key in _parse_cache:
+        return _parse_cache[key]
+
+    # Tier 2: JSON file cache (check DXF mtime)
+    cache_file = _cache_path(filepath)
+    dxf_mtime = filepath.stat().st_mtime if filepath.exists() else 0
+
+    if cache_file.exists():
+        try:
+            cache_mtime = cache_file.stat().st_mtime
+            if cache_mtime >= dxf_mtime:
+                raw = json.loads(cache_file.read_text(encoding="utf-8"))
+                fd = _dict_to_floor_data(raw)
+                _parse_cache[key] = fd
+                return fd
+        except Exception:
+            pass  # cache corrupted, re-parse
+
+    # Tier 3: full parse
+    fd = parse_dxf(str(filepath))
+    _parse_cache[key] = fd
+
+    # Write cache file
+    try:
+        cache_file.write_text(
+            json.dumps(_convert(dataclasses.asdict(fd)), ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass  # non-fatal
+
+    return fd
 
 
 # ---------------------------------------------------------------------------
