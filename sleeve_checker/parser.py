@@ -46,6 +46,13 @@ _LABEL_SEARCH_RADIUS = 1_500.0
 _RE_PHI = re.compile(r"[φΦ]|\d+\s*[φΦ]|[φΦ]\s*\d+|外径|\d+A\b", re.IGNORECASE)
 _RE_FL = re.compile(r"FL\s*[+\-]\s*\d+", re.IGNORECASE)
 
+# Known equipment/pipe type codes (whitelist)
+_RE_EQUIP_CODE = re.compile(
+    r"^(RD|KD|KV|SD|CW[WR]?|CDW|SP[D]?|EA|G\(|N2|CX|HS|WD|HR|CH[R]?|"
+    r"CR|XS|OA|KEA|RA|SA|SOA|D:|C:|H:|V:|W:|R:)\b",
+    re.IGNORECASE,
+)
+
 # ---------------------------------------------------------------------------
 # Layer-lookup helpers
 # ---------------------------------------------------------------------------
@@ -623,7 +630,15 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp, step_lines: list[StepLi
     """
     sleeve_layers = set(_find_layers(doc, "スリーブ"))
 
-    # Build candidate text list from sleeve layers only (for φ and same-layer FL)
+    # Also include 衛生 pipe layers (e.g. [衛生]雨水(STPG)) which carry
+    # equipment type codes (RD, KD, etc.) near sleeves
+    pipe_layers = set(
+        l.dxf.name for l in doc.layers
+        if l.dxf.name.startswith("[衛生]") and "スリーブ" not in l.dxf.name
+    )
+    search_layers = sleeve_layers | pipe_layers
+
+    # Build candidate text list from sleeve + pipe layers
     sleeve_candidates: list[tuple[float, float, str]] = []  # (x, y, text)
 
     for entity in msp:
@@ -631,7 +646,7 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp, step_lines: list[StepLi
             continue
 
         layer = entity.dxf.layer
-        if layer not in sleeve_layers:
+        if layer not in search_layers:
             continue
 
         try:
@@ -662,6 +677,8 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp, step_lines: list[StepLi
 
         best_phi_dist = float("inf")
         best_phi_txt: str | None = None
+        best_code_dist = float("inf")  # equipment type code (RD, CW, etc.)
+        best_code_txt: str | None = None
         best_fl_dist = float("inf")
         best_fl_txt: str | None = None
 
@@ -674,6 +691,11 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp, step_lines: list[StepLi
             if dist > _LABEL_SEARCH_RADIUS:
                 continue
 
+            # Equipment type code: whitelist of known pipe/duct codes
+            if (_RE_EQUIP_CODE.match(txt) and dist < best_code_dist):
+                best_code_dist = dist
+                best_code_txt = txt
+
             if _RE_PHI.search(txt) and dist < best_phi_dist:
                 best_phi_dist = dist
                 best_phi_txt = txt
@@ -682,7 +704,10 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp, step_lines: list[StepLi
                 best_fl_dist = dist
                 best_fl_txt = txt
 
-        if best_phi_txt is not None:
+        # Prefer equipment type code (e.g. "RD φ325") over plain phi (e.g. "(外径267φ)100A")
+        if best_code_txt is not None:
+            sleeve.label_text = best_code_txt
+        elif best_phi_txt is not None:
             sleeve.label_text = best_phi_txt
 
         if best_fl_txt is not None:
