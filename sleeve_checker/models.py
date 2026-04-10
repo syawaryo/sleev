@@ -8,6 +8,7 @@ class Sleeve:
     center: tuple[float, float]
     diameter: float
     label_text: str | None = None
+    diameter_text: str | None = None
     fl_text: str | None = None
     pn_number: str | None = None
     layer: str = ""
@@ -87,6 +88,13 @@ class SlabOutline:
 
 
 @dataclass
+class WaterGradient:
+    x: float
+    y: float
+    direction: str = ""  # "→", "←", "↑", "↓" or empty
+
+
+@dataclass
 class FloorData:
     sleeves: list[Sleeve] = field(default_factory=list)
     grid_lines: list[GridLine] = field(default_factory=list)
@@ -98,7 +106,9 @@ class FloorData:
     slab_outlines: list[SlabOutline] = field(default_factory=list)
     slab_labels: list[SlabLabel] = field(default_factory=list)
     pn_labels: list[PnLabel] = field(default_factory=list)
+    water_gradients: list[WaterGradient] = field(default_factory=list)
     slab_level: str | None = None
+    has_base_level_def: bool = False
 
 
 @dataclass

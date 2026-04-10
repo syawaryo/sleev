@@ -44,11 +44,6 @@ wall_thickness = {
     "不明":   st.sidebar.number_input("不明",    value=200, step=10),
 }
 
-st.sidebar.subheader("#7 段差近接しきい値")
-step_threshold_input = st.sidebar.number_input(
-    "しきい値 (mm)  ※ 0 = スキップ", value=0, step=50, min_value=0
-)
-step_threshold = float(step_threshold_input) if step_threshold_input > 0 else None
 
 # ---------------------------------------------------------------------------
 # File input section
@@ -142,7 +137,6 @@ if run_btn:
             floor_2f_data,
             floor_1f=floor_1f_data,
             wall_thickness=wall_thickness,
-            step_threshold=step_threshold,
         )
     st.session_state["results"] = results
 
@@ -208,6 +202,7 @@ def _make_hover(sleeve: Sleeve) -> str:
         f"<b>{sleeve.pn_number or sleeve.id}</b>",
         f"径: {sleeve.diameter:.0f} mm" if sleeve.diameter > 0 else "径: 不明",
         f"ラベル: {sleeve.label_text or '—'}",
+        f"口径: {sleeve.diameter_text or '—'}",
         f"FL: {sleeve.fl_text or '—'}",
     ]
     # Append check results for this sleeve

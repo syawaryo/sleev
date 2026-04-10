@@ -86,33 +86,40 @@ class TestCheckDiscipline:
 # ---------------------------------------------------------------------------
 
 class TestCheckDiameterLabel:
-    def test_ok_phi_prefix(self):
-        s = _make_sleeve(label_text="φ150")
+    def test_ok_both_nominal_and_outer(self):
+        s = _make_sleeve(diameter_text="175φ(外径180φ)100A")
         r = _first(check_diameter_label(s))
         assert r.severity == "OK"
 
-    def test_ok_phi_suffix(self):
-        s = _make_sleeve(label_text="150φ")
+    def test_ok_full_form_in_label(self):
+        s = _make_sleeve(label_text="KD 175φ(外径180φ)100A")
         r = _first(check_diameter_label(s))
         assert r.severity == "OK"
 
-    def test_ok_upper_phi(self):
-        s = _make_sleeve(label_text="Φ200")
+    def test_ok_split_texts(self):
+        s = _make_sleeve(label_text="RD φ175", diameter_text="(外径180φ)100A")
         r = _first(check_diameter_label(s))
         assert r.severity == "OK"
 
-    def test_ok_with_space(self):
-        s = _make_sleeve(label_text="φ 100")
+    def test_ng_nominal_only(self):
+        s = _make_sleeve(diameter_text="250φ")
         r = _first(check_diameter_label(s))
-        assert r.severity == "OK"
+        assert r.severity == "NG"
+        assert "外径" in r.message
 
-    def test_ng_no_phi(self):
-        s = _make_sleeve(label_text="150mm")
+    def test_ng_outer_only(self):
+        s = _make_sleeve(diameter_text="(外径230φ)150A")
+        r = _first(check_diameter_label(s))
+        assert r.severity == "NG"
+        assert "呼び口径" in r.message
+
+    def test_ng_none(self):
+        s = _make_sleeve(diameter_text=None)
         r = _first(check_diameter_label(s))
         assert r.severity == "NG"
 
-    def test_ng_none_label(self):
-        s = _make_sleeve(label_text=None)
+    def test_ng_only_a_size(self):
+        s = _make_sleeve(diameter_text="150A")
         r = _first(check_diameter_label(s))
         assert r.severity == "NG"
 
@@ -276,29 +283,31 @@ class TestCheckStepSlab:
     def _make_step(self, start, end):
         return StepLine(start=start, end=end)
 
-    def test_ok_no_threshold(self):
-        s = _make_sleeve(center=(0, 0))
-        r = _first(check_step_slab(s, [], None))
-        assert r.severity == "OK"
-        assert "スキップ" in r.message
-
     def test_ok_far_step(self):
-        s = _make_sleeve(center=(0, 0))
+        # sleeve diameter=100 (radius=50), step at x=5000 → edge_dist=4950 > 0
+        s = _make_sleeve(center=(0, 0), diameter=100)
         step = self._make_step((5000, 0), (5000, 1000))
-        results = check_step_slab(s, [step], threshold=300.0)
+        results = check_step_slab(s, [step])
         assert all(r.severity == "OK" for r in results)
 
-    def test_warning_close_step(self):
-        # sleeve at (0,0), step at x=100, threshold=300 → dist=100 < 300
-        s = _make_sleeve(center=(0, 0))
-        step = self._make_step((100, -500), (100, 500))
-        results = check_step_slab(s, [step], threshold=300.0)
-        warn = [r for r in results if r.severity == "WARNING"]
-        assert len(warn) >= 1
+    def test_ng_overlap(self):
+        # sleeve diameter=200 (radius=100), step at x=80 → edge_dist=80-100=-20 ≤ 0
+        s = _make_sleeve(center=(0, 0), diameter=200)
+        step = self._make_step((80, -500), (80, 500))
+        results = check_step_slab(s, [step])
+        ng = [r for r in results if r.severity == "NG"]
+        assert len(ng) >= 1
 
-    def test_ok_empty_steps_with_threshold(self):
-        s = _make_sleeve(center=(0, 0))
-        results = check_step_slab(s, [], threshold=300.0)
+    def test_ok_just_outside(self):
+        # sleeve diameter=100 (radius=50), step at x=60 → edge_dist=60-50=10 > 0
+        s = _make_sleeve(center=(0, 0), diameter=100)
+        step = self._make_step((60, -500), (60, 500))
+        results = check_step_slab(s, [step])
+        assert all(r.severity == "OK" for r in results)
+
+    def test_ok_no_steps(self):
+        s = _make_sleeve(center=(0, 0), diameter=100)
+        results = check_step_slab(s, [])
         assert all(r.severity == "OK" for r in results)
 
 
@@ -315,17 +324,18 @@ class TestCheckStepDim:
         return StepLine(start=start, end=end)
 
     def test_ok_not_on_step(self):
+        # dp3 near sleeve; reference dp2=(0,0) NOT on step at x=1000 → OK
         sleeve = _make_sleeve(id="s1", center=(500, 0))
-        dim = self._make_dim((0, 100), (0, 0), (500, 0))  # dp3 near sleeve, not on step
+        dim = self._make_dim((0, 100), (0, 0), (500, 0))
         step = self._make_step((1000, -500), (1000, 500))
         r = _first(check_step_dim(sleeve, [dim], [step]))
         assert r.severity == "OK"
 
     def test_ng_on_step(self):
-        # dp2=(500, 0) matches sleeve centre AND lies on step line
+        # dp2=(500,0) near sleeve; reference dp3=(0,0) ON step at x=0 → NG
         sleeve = _make_sleeve(id="s1", center=(500, 0))
-        dim = self._make_dim((0, 100), (500, 0), (0, 0))  # dp2 near sleeve, on step
-        step = self._make_step((500, -500), (500, 500))
+        dim = self._make_dim((0, 100), (500, 0), (0, 0))
+        step = self._make_step((0, -500), (0, 500))
         r = _first(check_step_dim(sleeve, [dim], [step]))
         assert r.severity == "NG"
 
@@ -341,34 +351,36 @@ class TestCheckStepDim:
 # ---------------------------------------------------------------------------
 
 class TestCheckSleeveCenterDim:
-    def _make_dim(self, dp1, dp2):
-        return DimLine(layer="test", measurement=500.0, defpoint1=dp1, defpoint2=dp2)
+    def test_ok_resolved(self):
+        s1 = _make_sleeve(id="s1")
+        s2 = _make_sleeve(id="s2")
+        x_res = {"s1": True, "s2": True}
+        y_res = {"s1": True, "s2": True}
+        results = check_sleeve_center_dim([s1, s2], x_res, y_res)
+        assert all(r.severity == "OK" for r in results)
 
-    def test_ok_no_match(self):
-        s1 = _make_sleeve(id="s1", center=(0, 0))
-        s2 = _make_sleeve(id="s2", center=(500, 0))
-        dim = self._make_dim((100, 100), (400, 100))  # doesn't hit centers
-        r = _first(check_sleeve_center_dim(dim, [s1, s2]))
-        assert r.severity == "OK"
+    def test_ng_not_resolved(self):
+        s1 = _make_sleeve(id="s1")
+        x_res = {"s1": False}
+        y_res = {"s1": True}
+        results = check_sleeve_center_dim([s1], x_res, y_res)
+        ng = [r for r in results if r.severity == "NG"]
+        assert len(ng) == 1
+        assert "X" in ng[0].message
 
-    def test_ng_spans_two_centers(self):
-        s1 = _make_sleeve(id="s1", center=(0, 0))
-        s2 = _make_sleeve(id="s2", center=(500, 0))
-        dim = self._make_dim((0, 0), (500, 0))
-        r = _first(check_sleeve_center_dim(dim, [s1, s2]))
-        assert r.severity == "NG"
+    def test_ng_both_unresolved(self):
+        s1 = _make_sleeve(id="s1")
+        x_res = {"s1": False}
+        y_res = {"s1": False}
+        results = check_sleeve_center_dim([s1], x_res, y_res)
+        ng = [r for r in results if r.severity == "NG"]
+        assert len(ng) == 1
+        assert "X" in ng[0].message and "Y" in ng[0].message
 
-    def test_ok_only_one_center_match(self):
-        s1 = _make_sleeve(id="s1", center=(0, 0))
-        s2 = _make_sleeve(id="s2", center=(500, 0))
-        dim = self._make_dim((0, 0), (250, 0))  # dp1 matches s1, dp2 matches nothing
-        r = _first(check_sleeve_center_dim(dim, [s1, s2]))
-        assert r.severity == "OK"
-
-    def test_ok_empty_sleeves(self):
-        dim = self._make_dim((0, 0), (500, 0))
-        r = _first(check_sleeve_center_dim(dim, []))
-        assert r.severity == "OK"
+    def test_ok_no_grids(self):
+        s1 = _make_sleeve(id="s1")
+        results = check_sleeve_center_dim([s1], None, None)
+        assert all(r.severity == "OK" for r in results)
 
 
 # ---------------------------------------------------------------------------
@@ -376,28 +388,33 @@ class TestCheckSleeveCenterDim:
 # ---------------------------------------------------------------------------
 
 class TestCheckColumnWallDim:
-    def _make_dim(self, dp1, dp2):
-        return DimLine(layer="test", measurement=500.0, defpoint1=dp1, defpoint2=dp2)
+    def _make_dim(self, dp1, dp2, dp3=None):
+        return DimLine(layer="test", measurement=500.0, defpoint1=dp1, defpoint2=dp2,
+                       defpoint3=dp3 if dp3 else (0.0, 0.0))
 
     def _make_col(self, start, end):
         return ColumnLine(start=start, end=end)
 
     def test_ok_not_on_column(self):
-        dim = self._make_dim((0, 0), (500, 0))
+        # dp2=(500,0) near sleeve; reference dp3=(0,0) NOT on column at x=1000 → OK
+        sleeve = _make_sleeve(id="s1", center=(500, 0))
+        dim = self._make_dim((0, 100), (500, 0), (0, 0))
         col = self._make_col((1000, -500), (1000, 500))
-        r = _first(check_column_wall_dim(dim, [col]))
+        r = _first(check_column_wall_dim(sleeve, [dim], [col]))
         assert r.severity == "OK"
 
     def test_ng_on_column(self):
-        # defpoint1=(500, 0) on vertical column line x=500
-        dim = self._make_dim((500, 0), (1000, 0))
-        col = self._make_col((500, -500), (500, 500))
-        r = _first(check_column_wall_dim(dim, [col]))
+        # dp2=(500,0) near sleeve; reference dp3=(0,0) ON column at x=0 → NG
+        sleeve = _make_sleeve(id="s1", center=(500, 0))
+        dim = self._make_dim((0, 100), (500, 0), (0, 0))
+        col = self._make_col((0, -500), (0, 500))
+        r = _first(check_column_wall_dim(sleeve, [dim], [col]))
         assert r.severity == "NG"
 
     def test_ok_no_columns(self):
-        dim = self._make_dim((0, 0), (500, 0))
-        r = _first(check_column_wall_dim(dim, []))
+        sleeve = _make_sleeve(id="s1", center=(500, 0))
+        dim = self._make_dim((0, 100), (500, 0), (0, 0))
+        r = _first(check_column_wall_dim(sleeve, [dim], []))
         assert r.severity == "OK"
 
 
@@ -425,7 +442,8 @@ class TestCheckDimSum:
 
     def test_ng_sums_dont_match(self):
         # Two V grids at X=0 and X=1000 (span=1000)
-        # Chain: 0→400 (400mm) + 400→900 (500mm) = 900 ≠ 1000
+        # Chain: 0→400 (400mm) + 400→1000 (measurement=500, wrong) = 900 ≠ 1000
+        # Both endpoints snap to grids (0 and 1000) but sum is wrong
         grids = [
             GridLine(axis_label="A", direction="V", position=0),
             GridLine(axis_label="B", direction="V", position=1000),
@@ -434,7 +452,7 @@ class TestCheckDimSum:
             DimLine(layer="t", measurement=400.0,
                     defpoint1=(400, 500), defpoint2=(0, 500), defpoint3=(400, 500)),
             DimLine(layer="t", measurement=500.0,
-                    defpoint1=(900, 500), defpoint2=(400, 500), defpoint3=(900, 500)),
+                    defpoint1=(1000, 500), defpoint2=(400, 500), defpoint3=(1000, 500)),
         ]
         results = check_dim_sum(dims, grids)
         ng_results = [r for r in results if r.severity == "NG"]
@@ -468,7 +486,7 @@ class TestCheckPositionDeterminacy:
             DimLine(layer="t", measurement=500.0, defpoint1=(600, 250),
                     defpoint2=(500, 0), defpoint3=(500, 500), angle=90),
         ]
-        results = check_position_determinacy([s], dims, grids, sleeve_margin=50.0, grid_tolerance=10.0)
+        results, _, _ = check_position_determinacy([s], dims, grids, sleeve_margin=50.0, grid_tolerance=10.0)
         assert len(results) == 1
         assert results[0].severity == "OK"
 
@@ -483,7 +501,7 @@ class TestCheckPositionDeterminacy:
             DimLine(layer="t", measurement=500.0, defpoint1=(250, 600),
                     defpoint2=(0, 500), defpoint3=(500, 500), angle=0),
         ]
-        results = check_position_determinacy([s], dims, grids, sleeve_margin=50.0, grid_tolerance=10.0)
+        results, _, _ = check_position_determinacy([s], dims, grids, sleeve_margin=50.0, grid_tolerance=10.0)
         assert results[0].severity == "NG"
         assert "Y" in results[0].message
 
@@ -509,13 +527,13 @@ class TestCheckPositionDeterminacy:
             DimLine(layer="t", measurement=500.0, defpoint1=(1100, 250),
                     defpoint2=(1000, 0), defpoint3=(1000, 500), angle=90),
         ]
-        results = check_position_determinacy([s1, s2], dims, grids, sleeve_margin=50.0, grid_tolerance=10.0)
+        results, _, _ = check_position_determinacy([s1, s2], dims, grids, sleeve_margin=50.0, grid_tolerance=10.0)
         assert all(r.severity == "OK" for r in results)
 
     def test_ok_no_grids(self):
         s = _make_sleeve(id="s1", center=(500, 500))
         dims = [DimLine(layer="t", measurement=500.0, defpoint1=(0, 500), defpoint2=(500, 500))]
-        results = check_position_determinacy([s], dims, [])
+        results, _, _ = check_position_determinacy([s], dims, [])
         assert all(r.severity == "OK" for r in results)
 
 

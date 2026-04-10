@@ -48,8 +48,9 @@ _RE_FL = re.compile(r"FL\s*[+\-]\s*\d+", re.IGNORECASE)
 
 # Known equipment/pipe type codes (whitelist)
 _RE_EQUIP_CODE = re.compile(
-    r"^(RD|KD|KV|SD|CW[WR]?|CDW|SP[D]?|EA|G\(|N2|CX|HS|WD|HR|CH[R]?|"
-    r"CR|XS|OA|KEA|RA|SA|SOA|D:|C:|H:|V:|W:|R:)\b",
+    r"^(RD|KD|KV|SD|CW[WRN]?|CDW|SP[D]?|EA|G\(|N2|CX|HS|WD|HR|CH[R]?|"
+    r"CR|XS|OA|KEA|RA|SA|SOA|D:|C:|H:|V:|W:|R:|"
+    r"P-UP)",
     re.IGNORECASE,
 )
 
@@ -361,32 +362,58 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
     Extract wall-related LINEs and LWPOLYLINE segments.
 
     Wall layers:
-    - ``C151_壁心``    → wall centre lines
-    - ``F106_RC壁``    → RC wall outlines
-    - ``A521_壁：仕上``→ wall finish lines
-    - ``A422_壁：ＡＬＣ``→ ALC wall
-    - ``A441_壁``      → LGS wall (suffix match)
+    - ``C151_壁心``       → wall centre lines
+    - ``F105_RC壁``       → RC wall outline (thin)
+    - ``F106_RC壁``       → RC wall structure lines
+    - ``A421_壁：ＲＣ``   → RC wall (architectural)
+    - ``A422_壁：ＡＬＣ`` → ALC wall
+    - ``A423_壁：PCa``    → Precast concrete wall
+    - ``A424_壁：パネル`` → Panel wall
+    - ``A441_壁：ＬＧＳ`` → LGS wall
+    - ``A443_壁：ＣＢ``   → Concrete block wall
+    - ``A521_壁：仕上``   → wall finish lines
+    - ``A561_耐火被覆``   → fire-resistant covering
+    - ``★既存躯体外壁``   → existing exterior wall
     """
     wall_keywords = [
         "C151_壁心",
+        "F105_RC壁",
         "F106_RC壁",
-        "A521_壁：仕上",
-        "A422_壁：ＡＬＣ",
+        "A421_壁",
+        "A422_壁",
+        "A423_壁",
+        "A424_壁",
         "A441_壁",
+        "A443_壁",
+        "A521_壁",
+        "A561_耐火被覆",
+        "★既存躯体外壁",
     ]
     wall_layers = _find_layers_any(doc, wall_keywords)
 
     def _wall_type(layer_name: str) -> str:
         if "壁心" in layer_name or "C151" in layer_name:
             return "壁心"
-        if "RC壁" in layer_name or "F106" in layer_name or "F105" in layer_name:
+        if "RC壁" in layer_name or "F105" in layer_name or "F106" in layer_name:
+            return "RC壁"
+        if "A421" in layer_name and "ＲＣ" in layer_name:
             return "RC壁"
         if "仕上" in layer_name or "A521" in layer_name:
             return "仕上"
         if "ＡＬＣ" in layer_name or "ALC" in layer_name or "A422" in layer_name:
             return "ALC"
-        if "A441" in layer_name:
+        if "PCa" in layer_name or "A423" in layer_name:
+            return "PCa"
+        if "パネル" in layer_name or "A424" in layer_name:
+            return "パネル"
+        if "A441" in layer_name or "ＬＧＳ" in layer_name:
             return "LGS"
+        if "ＣＢ" in layer_name or "A443" in layer_name:
+            return "CB"
+        if "耐火被覆" in layer_name or "A561" in layer_name:
+            return "耐火被覆"
+        if "既存躯体外壁" in layer_name:
+            return "RC壁"
         return "不明"
 
     wall_lines: list[WallLine] = []
@@ -439,11 +466,14 @@ def _extract_step_lines(doc, msp) -> list[StepLine]:
     """
     Extract slab step (段差) and recess (床ヌスミ) lines.
 
-    Relevant layer suffixes:
-    - ``F108_3_RCスラブ段差線``
-    - ``F108_5_床ヌスミ``
+    Relevant layer keywords:
+    - ``F108_3_RCスラブ段差線``  — slab level-change boundaries
+    - ``F108_5_床ヌスミ``        — floor recess boundaries
     """
-    step_keywords = ["F108_3_RCスラブ段差線", "F108_5_床ヌスミ", "段差"]
+    step_keywords = [
+        "F108_3_RCスラブ段差線",
+        "F108_5_床ヌスミ",
+    ]
     step_layers = _find_layers_any(doc, step_keywords)
 
     step_lines: list[StepLine] = []
@@ -481,7 +511,12 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
     Extract RC column outlines (F102_RC柱), S column outlines (F201_Ｓ柱),
     and wall finish lines (A521_壁：仕上) as ColumnLine objects.
     """
-    col_keywords = ["F102_RC柱", "F101_RC柱", "F201_Ｓ柱", "F201_S柱", "A521_壁：仕上", "A521_壁:仕上"]
+    col_keywords = [
+        "F102_RC柱", "F101_RC柱",
+        "F201_Ｓ柱", "F201_S柱",
+        "A412_柱",
+        "A521_壁：仕上", "A521_壁:仕上",
+    ]
     col_layers = _find_layers_any(doc, col_keywords)
 
     col_lines: list[ColumnLine] = []
@@ -675,8 +710,7 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp, step_lines: list[StepLi
     for sleeve in sleeves:
         cx, cy = sleeve.center
 
-        best_phi_dist = float("inf")
-        best_phi_txt: str | None = None
+        phi_hits: list[tuple[float, str]] = []  # (dist, txt) — all φ/外径 matches
         best_code_dist = float("inf")  # equipment type code (RD, CW, etc.)
         best_code_txt: str | None = None
         best_fl_dist = float("inf")
@@ -696,19 +730,27 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp, step_lines: list[StepLi
                 best_code_dist = dist
                 best_code_txt = txt
 
-            if _RE_PHI.search(txt) and dist < best_phi_dist:
-                best_phi_dist = dist
-                best_phi_txt = txt
+            if _RE_PHI.search(txt):
+                phi_hits.append((dist, txt))
 
             if _RE_FL.search(txt) and dist < best_fl_dist:
                 best_fl_dist = dist
                 best_fl_txt = txt
 
-        # Prefer equipment type code (e.g. "RD φ325") over plain phi (e.g. "(外径267φ)100A")
+        # Sort φ hits by distance
+        phi_hits.sort()
+        best_phi_txt = phi_hits[0][1] if phi_hits else None
+
+        # label_text: prefer equipment code, fall back to φ text (original behaviour)
         if best_code_txt is not None:
             sleeve.label_text = best_code_txt
         elif best_phi_txt is not None:
             sleeve.label_text = best_phi_txt
+
+        # diameter_text: combine all nearby φ/外径 texts (they may be split
+        # across multiple TEXT entities, e.g. "V 175φ" + "(外径180φ)100A")
+        if phi_hits:
+            sleeve.diameter_text = " ".join(txt for _, txt in phi_hits)
 
         if best_fl_txt is not None:
             # Found FL on the sleeve's own layer — use as-is
@@ -948,8 +990,15 @@ def _extract_pn_pointers(
         if best_far is not None:
             result[pn_text] = best_far
 
-    # --- Source B: Arrow INSERTs on [衛生]スリーブ near P-N texts ---
-    arrow_inserts: list[tuple[float, float, tuple[float, float]]] = []
+    # --- Source B: Arrow/Leader INSERTs on [衛生]スリーブ ---
+    # Two sub-types:
+    #  B1) Arrow INSERT with closed 3-pt LWPOLYLINE (triangle) + LINE
+    #      → tip = vertex opposite longest edge of triangle
+    #  B2) Leader INSERT with open LWPOLYLINE (bent leader line)
+    #      → tip = first vertex, tail = last vertex (near P-N text)
+    arrow_inserts: list[tuple[float, float, tuple[float, float]]] = []  # (origin_x, origin_y, tip_world)
+    leader_inserts: list[tuple[tuple[float, float], tuple[float, float]]] = []  # (tip_world, tail_world)
+
     for entity in msp:
         if entity.dxftype() != "INSERT" or entity.dxf.layer not in スリーブ_layers:
             continue
@@ -961,47 +1010,65 @@ def _extract_pn_pointers(
         except Exception:
             continue
 
-        tip_local = (0.0, 0.0)
-        best_d = 0.0
-        has_geom = False
-        for be in block:
-            if be.dxftype() == "LWPOLYLINE":
-                pts = [(float(p[0]), float(p[1])) for p in be.get_points()]
-                if len(pts) == 3:
-                    # Triangle: tip = vertex opposite the longest edge (base)
-                    edges = [
-                        (math.hypot(pts[1][0]-pts[2][0], pts[1][1]-pts[2][1]), 0),
-                        (math.hypot(pts[0][0]-pts[2][0], pts[0][1]-pts[2][1]), 1),
-                        (math.hypot(pts[0][0]-pts[1][0], pts[0][1]-pts[1][1]), 2),
-                    ]
-                    longest_edge_opposite = max(edges, key=lambda e: e[0])[1]
-                    tip_local = pts[longest_edge_opposite]
-                    best_d = math.hypot(tip_local[0], tip_local[1])
-                else:
-                    for p in pts:
-                        d = math.hypot(p[0], p[1])
-                        if d > best_d:
-                            best_d = d
-                            tip_local = p
-                has_geom = True
-            elif be.dxftype() == "LINE":
-                for pt in (be.dxf.start, be.dxf.end):
-                    px, py = float(pt.x), float(pt.y)
-                    d = math.hypot(px, py)
-                    if d > best_d:
-                        best_d = d
-                        tip_local = (px, py)
-                has_geom = True
-        if not has_geom or best_d < 100:
+        ix, iy = float(entity.dxf.insert.x), float(entity.dxf.insert.y)
+        if not _in_building_range(ix, iy):
             continue
 
-        ix, iy = float(entity.dxf.insert.x), float(entity.dxf.insert.y)
-        if _in_building_range(ix, iy):
-            arrow_inserts.append((ix, iy, (ix + tip_local[0], iy + tip_local[1])))
+        # Classify block contents
+        found_leader = False
+        for be in block:
+            if be.dxftype() != "LWPOLYLINE":
+                continue
+            pts = [(float(p[0]), float(p[1])) for p in be.get_points()]
 
-    # For each arrow INSERT, find the P-N whose frame is closest to the
-    # arrow INSERT origin (not the tip).  Also verify the arrow tip is
-    # farther from the P-N than the INSERT origin (i.e. arrow points away).
+            if not be.closed and len(pts) >= 2:
+                # B2: Open polyline = bent leader line
+                total_len = sum(
+                    math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1])
+                    for i in range(len(pts)-1)
+                )
+                if total_len >= 200:
+                    tip_world = (ix + pts[0][0], iy + pts[0][1])
+                    tail_world = (ix + pts[-1][0], iy + pts[-1][1])
+                    leader_inserts.append((tip_world, tail_world))
+                    found_leader = True
+
+        if not found_leader:
+            # B1: Arrow INSERT — find tip from triangle + LINE geometry
+            tip_local = (0.0, 0.0)
+            best_d = 0.0
+            has_geom = False
+            for be in block:
+                if be.dxftype() == "LWPOLYLINE":
+                    pts = [(float(p[0]), float(p[1])) for p in be.get_points()]
+                    if len(pts) == 3:
+                        edges = [
+                            (math.hypot(pts[1][0]-pts[2][0], pts[1][1]-pts[2][1]), 0),
+                            (math.hypot(pts[0][0]-pts[2][0], pts[0][1]-pts[2][1]), 1),
+                            (math.hypot(pts[0][0]-pts[1][0], pts[0][1]-pts[1][1]), 2),
+                        ]
+                        longest_edge_opposite = max(edges, key=lambda e: e[0])[1]
+                        tip_local = pts[longest_edge_opposite]
+                        best_d = math.hypot(tip_local[0], tip_local[1])
+                    else:
+                        for p in pts:
+                            d = math.hypot(p[0], p[1])
+                            if d > best_d:
+                                best_d = d
+                                tip_local = p
+                    has_geom = True
+                elif be.dxftype() == "LINE":
+                    for pt in (be.dxf.start, be.dxf.end):
+                        px, py = float(pt.x), float(pt.y)
+                        d = math.hypot(px, py)
+                        if d > best_d:
+                            best_d = d
+                            tip_local = (px, py)
+                    has_geom = True
+            if has_geom and best_d >= 100:
+                arrow_inserts.append((ix, iy, (ix + tip_local[0], iy + tip_local[1])))
+
+    # Match arrow INSERTs (B1) to P-N labels
     used_arrows: set[int] = set()
     for pn in sorted(pn_labels, key=lambda p: p.number):
         if pn.text in result:
@@ -1014,7 +1081,6 @@ def _extract_pn_pointers(
                 continue
             d_origin = math.hypot(aix - pn.x, aiy - pn.y)
             d_tip = math.hypot(tip_x - pn.x, tip_y - pn.y)
-            # Arrow origin should be near P-N, and tip should be farther away
             if d_origin < best_arrow_d and d_tip > d_origin:
                 best_arrow_d = d_origin
                 best_arrow_idx = i
@@ -1022,6 +1088,40 @@ def _extract_pn_pointers(
         if best_arrow_idx is not None and best_tip is not None and best_arrow_d < 3000:
             result[pn.text] = best_tip
             used_arrows.add(best_arrow_idx)
+
+    # Match leader INSERTs (B2) to P-N labels using global best-match.
+    # Direction is determined at matching time: for each (pn, leader) pair,
+    # the end nearer to the P-N text is the P-N side; the other end is the
+    # sleeve tip.  We store both ends and resolve direction per-pair.
+    candidates: list[tuple[float, int, str, tuple[float, float], tuple[float, float]]] = []
+
+    for pn in pn_labels:
+        if pn.text in result:
+            continue
+        for i, (end_a, end_b) in enumerate(leader_inserts):
+            d_a = math.hypot(end_a[0] - pn.x, end_a[1] - pn.y)
+            d_b = math.hypot(end_b[0] - pn.x, end_b[1] - pn.y)
+            near_d = min(d_a, d_b)
+            if near_d < 3000:
+                candidates.append((near_d, i, pn.text, end_a, end_b))
+    candidates.sort()
+
+    used_leaders: set[int] = set()
+    used_pn_texts: set[str] = set()
+    for _d, leader_idx, pn_text, end_a, end_b in candidates:
+        if leader_idx in used_leaders or pn_text in used_pn_texts:
+            continue
+        # Find which P-N label this is
+        pn = next((p for p in pn_labels if p.text == pn_text), None)
+        if pn is None:
+            continue
+        # Determine direction: end closer to P-N = tail, other = sleeve tip
+        d_a = math.hypot(end_a[0] - pn.x, end_a[1] - pn.y)
+        d_b = math.hypot(end_b[0] - pn.x, end_b[1] - pn.y)
+        sleeve_end = end_b if d_a <= d_b else end_a
+        result[pn_text] = sleeve_end
+        used_leaders.add(leader_idx)
+        used_pn_texts.add(pn_text)
 
     return result
 
@@ -1042,6 +1142,10 @@ def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel],
 
     P-N numbers are only assigned to 衛生 (plumbing) sleeves.
     空調/電気 sleeves do not carry P-N numbers.
+
+    When a P-N label is matched to a sleeve, also look for diameter/FL texts
+    near the P-N text and assign them to the sleeve if the sleeve doesn't
+    already have them (from the initial label_text pass).
     """
     if not pn_labels or not sleeves:
         return
@@ -1049,35 +1153,87 @@ def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel],
     used_sleeves: set[str] = set()
     used_pns: set[str] = set()
 
+    # Pre-collect candidate texts near P-N labels for diameter/FL enrichment.
+    # Key: pn.text → list of (dist, txt) within PN_ENRICH_RADIUS of P-N position
+    _PN_ENRICH_RADIUS = 2000.0
+    pn_nearby_texts: dict[str, list[tuple[float, str]]] = {}
+    if doc is not None and msp is not None:
+        # Collect all TEXT/MTEXT on sleeve + pipe layers
+        _enrich_layers = set(_find_layers(doc, "スリーブ")) | {
+            l.dxf.name for l in doc.layers
+            if l.dxf.name.startswith("[衛生]") and "スリーブ" not in l.dxf.name
+        }
+        _enrich_texts: list[tuple[float, float, str]] = []
+        for entity in msp:
+            if entity.dxftype() not in ("TEXT", "MTEXT"):
+                continue
+            if entity.dxf.layer not in _enrich_layers:
+                continue
+            try:
+                raw = (entity.dxf.text if entity.dxftype() == "TEXT" else entity.plain_mtext()) or ""
+                raw = raw.strip()
+                if not raw:
+                    continue
+                pos = entity.dxf.insert
+                _enrich_texts.append((float(pos.x), float(pos.y), raw))
+            except Exception:
+                continue
+
+        for pn in pn_labels:
+            nearby = []
+            for tx, ty, txt in _enrich_texts:
+                d = math.hypot(tx - pn.x, ty - pn.y)
+                if d < _PN_ENRICH_RADIUS:
+                    nearby.append((d, txt))
+            nearby.sort()
+            pn_nearby_texts[pn.text] = nearby
+
+    def _enrich_sleeve_from_pn(sleeve: Sleeve, pn_text: str) -> None:
+        """Fill in diameter_text / fl_text from texts near the P-N label.
+
+        Combines all φ/外径 texts near the P-N label (they may be split
+        across multiple TEXT entities).
+        """
+        phi_texts: list[str] = []
+        best_fl: str | None = None
+        for _d, txt in pn_nearby_texts.get(pn_text, []):
+            if _RE_PHI.search(txt) and not re.match(r"P-N-", txt):
+                phi_texts.append(txt)
+            if best_fl is None and _RE_FL.search(txt):
+                best_fl = txt
+        if phi_texts:
+            sleeve.diameter_text = " ".join(phi_texts)
+        if best_fl is not None and sleeve.fl_text is None:
+            sleeve.fl_text = best_fl
+
     # --- Phase 1: Pointer-based matching (LINE leaders + arrow INSERTs) ---
+    # Use global best-match (greedy by smallest tip-to-sleeve distance)
+    # to avoid earlier P-N numbers stealing sleeves meant for closer P-Ns.
     if doc is not None and msp is not None:
         leaders = _extract_pn_pointers(doc, msp, pn_labels)
 
-        for pn in sorted(pn_labels, key=lambda p: p.number):
+        phase1_candidates: list[tuple[float, str, str, float, float]] = []  # (dist, pn_text, sleeve_id, tip_x, tip_y)
+        for pn in pn_labels:
             if pn.text not in leaders:
                 continue
-
             far_x, far_y = leaders[pn.text]
-
-            # Find nearest 衛生 sleeve to pointer far-end
-            best_tip_dist = float("inf")
-            best_sleeve: Sleeve | None = None
             for s in sleeves:
-                if s.id in used_sleeves:
-                    continue
                 if s.discipline != "衛生":
                     continue
                 d = math.hypot(far_x - s.center[0], far_y - s.center[1])
-                if d < best_tip_dist:
-                    best_tip_dist = d
-                    best_sleeve = s
+                phase1_candidates.append((d, pn.text, s.id, far_x, far_y))
+        phase1_candidates.sort()
 
-            if best_sleeve is not None:
-                best_sleeve.pn_number = pn.text
-                # Store leader line endpoints for rendering
-                pn.arrow_verts = [(pn.x, pn.y), (far_x, far_y)]
-                used_sleeves.add(best_sleeve.id)
-                used_pns.add(pn.text)
+        for d, pn_text, sleeve_id, far_x, far_y in phase1_candidates:
+            if pn_text in used_pns or sleeve_id in used_sleeves:
+                continue
+            sleeve = next(s for s in sleeves if s.id == sleeve_id)
+            sleeve.pn_number = pn_text
+            _enrich_sleeve_from_pn(sleeve, pn_text)
+            pn = next(p for p in pn_labels if p.text == pn_text)
+            pn.arrow_verts = [(pn.x, pn.y), (far_x, far_y)]
+            used_sleeves.add(sleeve_id)
+            used_pns.add(pn_text)
 
     # --- Phase 2: Fallback nearest-neighbour for P-N without pointers ---
     for pn in sorted(pn_labels, key=lambda p: p.number):
@@ -1096,6 +1252,7 @@ def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel],
                 best_sleeve = s
         if best_sleeve is not None:
             best_sleeve.pn_number = pn.text
+            _enrich_sleeve_from_pn(best_sleeve, pn.text)
             used_sleeves.add(best_sleeve.id)
             used_pns.add(pn.text)
 
@@ -1237,6 +1394,32 @@ def _extract_slab_outlines(doc, msp) -> list[SlabOutline]:
 
 
 # ---------------------------------------------------------------------------
+# Base level definition detection
+# ---------------------------------------------------------------------------
+
+_RE_BASE_LEVEL_DEF = re.compile(r"\dFL\s*[＝=]")
+
+
+def _detect_base_level_def(doc) -> bool:
+    """Check if the drawing contains a base level definition (e.g. '1FL＝B1FL+5150').
+
+    These are typically inside INSERT blocks (not directly in modelspace),
+    so we search all block definitions.
+    """
+    for block in doc.blocks:
+        for entity in block:
+            if entity.dxftype() != "TEXT":
+                continue
+            try:
+                txt = entity.dxf.text or ""
+                if _RE_BASE_LEVEL_DEF.search(txt):
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Slab level extraction
 # ---------------------------------------------------------------------------
 
@@ -1284,6 +1467,82 @@ def _extract_slab_level(doc, msp) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Water gradient extraction
+# ---------------------------------------------------------------------------
+
+def _extract_water_gradients(doc, msp) -> list:
+    """Extract '水勾配' texts + arrow directions from A221_記入文字 layers."""
+    from .models import WaterGradient
+
+    layers = set()
+    for layer in doc.layers:
+        name = layer.dxf.name
+        if "A221" in name and "記入" in name:
+            layers.add(name)
+
+    # Pass 1: collect gradient texts and arrow triangles
+    grad_texts: list[tuple[float, float]] = []
+    arrows: list[tuple[float, float, str]] = []  # (cx, cy, direction)
+
+    for entity in msp:
+        if entity.dxf.layer not in layers:
+            continue
+        try:
+            if entity.dxftype() in ("TEXT", "MTEXT"):
+                txt = entity.dxf.text if entity.dxftype() == "TEXT" else entity.plain_mtext()
+                if txt and "水勾配" in txt:
+                    pos = entity.dxf.insert
+                    grad_texts.append((pos.x, pos.y))
+
+            elif entity.dxftype() == "LWPOLYLINE":
+                pts = list(entity.get_points())
+                if len(pts) == 3 and not entity.closed:
+                    coords = [(p[0], p[1]) for p in pts]
+                    # Longest side's opposite vertex = arrow tip
+                    sides = [
+                        (math.hypot(coords[1][0] - coords[2][0], coords[1][1] - coords[2][1]), 0),
+                        (math.hypot(coords[0][0] - coords[2][0], coords[0][1] - coords[2][1]), 1),
+                        (math.hypot(coords[0][0] - coords[1][0], coords[0][1] - coords[1][1]), 2),
+                    ]
+                    _, tip_idx = max(sides, key=lambda s: s[0])
+                    tip = coords[tip_idx]
+                    base = [coords[i] for i in range(3) if i != tip_idx]
+                    mid = ((base[0][0] + base[1][0]) / 2, (base[0][1] + base[1][1]) / 2)
+                    dx = tip[0] - mid[0]
+                    dy = tip[1] - mid[1]
+                    angle = math.degrees(math.atan2(dy, dx))
+
+                    if -45 <= angle < 45:
+                        direction = "→"
+                    elif 45 <= angle < 135:
+                        direction = "↑"
+                    elif -135 <= angle < -45:
+                        direction = "↓"
+                    else:
+                        direction = "←"
+
+                    cx = sum(c[0] for c in coords) / 3
+                    cy = sum(c[1] for c in coords) / 3
+                    arrows.append((cx, cy, direction))
+        except Exception:
+            continue
+
+    # Pass 2: match each gradient text to nearest arrow within 1000mm
+    results: list[WaterGradient] = []
+    for gx, gy in grad_texts:
+        direction = ""
+        best_dist = 1000.0  # max match distance
+        for ax, ay, d in arrows:
+            dist = math.hypot(gx - ax, gy - ay)
+            if dist < best_dist:
+                best_dist = dist
+                direction = d
+        results.append(WaterGradient(x=gx, y=gy, direction=direction))
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -1321,6 +1580,8 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     slab_outlines = _extract_slab_outlines(doc, msp)
     slab_labels = _extract_slab_labels(doc, msp)
     slab_level = _extract_slab_level(doc, msp)
+    water_gradients = _extract_water_gradients(doc, msp)
+    has_base_level_def = _detect_base_level_def(doc)
 
     return FloorData(
         sleeves=sleeves,
@@ -1333,5 +1594,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         slab_outlines=slab_outlines,
         slab_labels=slab_labels,
         pn_labels=pn_labels,
+        water_gradients=water_gradients,
         slab_level=slab_level,
+        has_base_level_def=has_base_level_def,
     )

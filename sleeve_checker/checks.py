@@ -7,6 +7,7 @@ run_all_checks() wires them all together given FloorData objects.
 
 from __future__ import annotations
 
+import math
 import re
 from collections import defaultdict
 
@@ -17,6 +18,7 @@ from .models import (
     DimLine,
     FloorData,
     GridLine,
+    SlabLabel,
     Sleeve,
     StepLine,
     WallLine,
@@ -26,7 +28,7 @@ from .models import (
 # Constants
 # ---------------------------------------------------------------------------
 
-DRAIN_CODES = ["SD", "RD", "WD", "排水", "汚水", "雨水"]
+DRAIN_CODES = ["SD", "RD", "WD", "KD", "CDW", "SPD", "D:", "排水", "汚水", "雨水"]
 
 _DEFAULT_WALL_THICKNESS: dict[str, float] = {
     "RC": 0,
@@ -34,6 +36,8 @@ _DEFAULT_WALL_THICKNESS: dict[str, float] = {
     "ALC": 150,
     "PCa": 200,
     "パネル": 100,
+    "CB": 150,
+    "耐火被覆": 50,
     "不明": 200,
 }
 
@@ -64,26 +68,45 @@ def check_discipline(sleeve: Sleeve) -> list[CheckResult]:
 # #3 check_diameter_label
 # ---------------------------------------------------------------------------
 
-_RE_DIAMETER = re.compile(r"[φΦø]\s*\d+|\d+\s*[φΦø]")
+_RE_OUTER = re.compile(r"外径\s*\d+\s*[φΦø]?")
+# Match φ+number, number+φ, or number+A (pipe size like 150A)
+_RE_PHI_NUM = re.compile(r"(\d+)\s*[φΦø]|[φΦø]\s*(\d+)|(\d+)A\b")
 
 
 def check_diameter_label(sleeve: Sleeve) -> list[CheckResult]:
-    """Check #3: label_text contains a diameter mark (φ/Φ/ø + number)."""
+    """Check #3: diameter_text contains both nominal diameter (呼び口径) and outer diameter (外径)."""
+    txt = sleeve.diameter_text or ""
+    # Also check label_text — full-form texts like "KD 175φ(外径180φ)100A"
+    # may land in label_text when the equipment code matched
     label = sleeve.label_text or ""
-    if _RE_DIAMETER.search(label):
+    combined = f"{txt} {label}"
+
+    has_outer = bool(_RE_OUTER.search(combined))
+    # To detect nominal diameter, strip out 外径 portions first so "外径230φ" doesn't false-match
+    stripped = _RE_OUTER.sub("", combined)
+    has_nominal = bool(_RE_PHI_NUM.search(stripped))
+
+    if has_nominal and has_outer:
         return [CheckResult(
             check_id=3,
             check_name="口径・外径記載",
             severity="OK",
             sleeve=sleeve,
-            message="口径記載あり",
+            message="呼び口径・外径記載あり",
         )]
+
+    missing = []
+    if not has_nominal:
+        missing.append("呼び口径")
+    if not has_outer:
+        missing.append("外径")
+
     return [CheckResult(
         check_id=3,
         check_name="口径・外径記載",
         severity="NG",
         sleeve=sleeve,
-        message="φ記載なし",
+        message=f"{'・'.join(missing)}の記載なし",
         related_coords=[sleeve.center],
     )]
 
@@ -94,9 +117,24 @@ def check_diameter_label(sleeve: Sleeve) -> list[CheckResult]:
 
 _RE_GRADIENT = re.compile(r"FL|1/\d+", re.IGNORECASE)
 
+_GRADIENT_SEARCH_RADIUS = 1500.0  # mm — search radius for nearby gradient info
 
-def check_gradient(sleeve: Sleeve) -> list[CheckResult]:
-    """Check #5: drain sleeves must have FL or gradient annotation."""
+
+def check_gradient(
+    sleeve: Sleeve,
+    pn_labels: list | None = None,
+    slab_zones: list | None = None,
+    slab_labels: list | None = None,
+    water_gradients: list | None = None,
+) -> list[CheckResult]:
+    """Check #5: drain sleeves — collect gradient/flow info and flag for review.
+
+    For drain sleeves, report:
+    - FL value on sleeve itself
+    - P-N number (pipe route)
+    - Nearby water gradient text (水勾配)
+    - Nearby slab gradient (range slab label like 350～300)
+    """
     label = sleeve.label_text or ""
     is_drain = any(code in label for code in DRAIN_CODES)
 
@@ -109,52 +147,168 @@ def check_gradient(sleeve: Sleeve) -> list[CheckResult]:
             message="排水スリーブではないためスキップ",
         )]
 
+    pn_labels = pn_labels or []
+    slab_zones = slab_zones or []
+    slab_labels = slab_labels or []
+    water_gradients = water_gradients or []
+    sx, sy = sleeve.center
+    r = _GRADIENT_SEARCH_RADIUS
+
+    # --- FL value on sleeve itself ---
     fl = sleeve.fl_text or ""
-    if _RE_GRADIENT.search(fl) or _RE_GRADIENT.search(label):
+    has_fl = bool(_RE_GRADIENT.search(fl) or _RE_GRADIENT.search(label))
+
+    # --- P-N number (use pre-assigned first, fallback to nearest) ---
+    pn_str = sleeve.pn_number or ""
+    if not pn_str:
+        for pn in pn_labels:
+            dist = math.hypot(sx - pn.x, sy - pn.y)
+            if dist < r:
+                pn_str = pn.text
+                break
+
+    # --- Nearby water gradient text (水勾配) ---
+    nearest_wg_dist = float("inf")
+    nearest_wg_direction = ""
+    for wg in water_gradients:
+        dist = math.hypot(sx - wg.x, sy - wg.y)
+        if dist < nearest_wg_dist:
+            nearest_wg_dist = dist
+            nearest_wg_direction = wg.direction
+    has_water_gradient = nearest_wg_dist <= r
+
+    # --- Nearby slab gradient (range label like 350～300) ---
+    nearest_slab_gradient: str | None = None
+    nearest_sg_dist = float("inf")
+    for sl in slab_labels:
+        if "～" not in sl.level and "~" not in sl.level:
+            continue
+        dist = math.hypot(sx - sl.x, sy - sl.y)
+        if dist < r and dist < nearest_sg_dist:
+            nearest_slab_gradient = sl.level
+            nearest_sg_dist = dist
+
+    # --- Build detail message ---
+    details: list[str] = []
+    details.append(f"FL記載: {'あり (' + fl + ')' if has_fl else 'なし'}")
+    if pn_str:
+        details.append(f"配管番号: {pn_str}")
+    if has_water_gradient:
+        dir_str = f" {nearest_wg_direction}" if nearest_wg_direction else ""
+        details.append(f"水勾配: あり{dir_str} ({nearest_wg_dist:.0f}mm)")
+    if nearest_slab_gradient:
+        details.append(f"スラブ勾配: {nearest_slab_gradient} ({nearest_sg_dist:.0f}mm)")
+
+    detail_str = " | ".join(details)
+
+    # Drain sleeve with nearby gradient info → WARNING for human review
+    if has_water_gradient or nearest_slab_gradient:
         return [CheckResult(
             check_id=5,
             check_name="勾配記載",
-            severity="OK",
+            severity="WARNING",
             sleeve=sleeve,
-            message="勾配または高さ記載あり",
+            message=f"排水スリーブ 勾配確認要 | {detail_str}",
+            related_coords=[sleeve.center],
+        )]
+
+    if not has_fl:
+        return [CheckResult(
+            check_id=5,
+            check_name="勾配記載",
+            severity="WARNING",
+            sleeve=sleeve,
+            message=f"排水スリーブ FL記載なし | {detail_str}",
+            related_coords=[sleeve.center],
         )]
 
     return [CheckResult(
         check_id=5,
         check_name="勾配記載",
-        severity="WARNING",
+        severity="OK",
         sleeve=sleeve,
-        message="排水スリーブだが勾配・FL記載なし",
-        related_coords=[sleeve.center],
+        message=f"排水スリーブ | {detail_str}",
     )]
 
 
 # ---------------------------------------------------------------------------
-# #8 check_fl_label
+# #8 check_base_level
 # ---------------------------------------------------------------------------
 
-_RE_FL = re.compile(r"FL\s*[±+\-]\s*\d+", re.IGNORECASE)
+_RE_BASE_LEVEL = re.compile(r"\dFL\s*[＝=]", re.IGNORECASE)
 
 
-def check_fl_label(sleeve: Sleeve) -> list[CheckResult]:
-    """Check #8: fl_text matches FL±/+/- number pattern."""
-    fl = sleeve.fl_text or ""
-    if _RE_FL.search(fl):
-        return [CheckResult(
+def check_base_level(
+    slab_labels: list[SlabLabel],
+    has_base_level_def: bool = False,
+) -> list[CheckResult]:
+    """Check #8: base level definition exists and each slab has level info.
+
+    Parameters
+    ----------
+    slab_labels:
+        All SlabLabel objects extracted from F308 layers.
+    has_base_level_def:
+        Whether the drawing contains a base level definition
+        (e.g. ``1FL＝B1FL+5150``).
+    """
+    results: list[CheckResult] = []
+
+    # 1. Base level definition check
+    if has_base_level_def:
+        results.append(CheckResult(
             check_id=8,
-            check_name="FL記載",
+            check_name="基準レベル記載",
             severity="OK",
-            sleeve=sleeve,
-            message="FL記載あり",
-        )]
-    return [CheckResult(
-        check_id=8,
-        check_name="FL記載",
-        severity="NG",
-        sleeve=sleeve,
-        message="FL記載なし・形式不正",
-        related_coords=[sleeve.center],
-    )]
+            sleeve=None,
+            message="基準レベル定義あり",
+        ))
+    else:
+        results.append(CheckResult(
+            check_id=8,
+            check_name="基準レベル記載",
+            severity="NG",
+            sleeve=None,
+            message="基準レベル（1FL等）の定義なし",
+        ))
+
+    # 2. Per-slab-number level check
+    if not slab_labels:
+        results.append(CheckResult(
+            check_id=8,
+            check_name="基準レベル記載",
+            severity="NG",
+            sleeve=None,
+            message="スラブラベルが図面に存在しない",
+        ))
+        return results
+
+    # Group by slab number
+    slab_map: dict[str, list[SlabLabel]] = defaultdict(list)
+    for sl in slab_labels:
+        slab_map[sl.slab_no].append(sl)
+
+    for slab_no, labels in sorted(slab_map.items()):
+        has_level = any(sl.level.strip() for sl in labels)
+        if has_level:
+            levels = sorted({sl.level for sl in labels if sl.level.strip()})
+            results.append(CheckResult(
+                check_id=8,
+                check_name="基準レベル記載",
+                severity="OK",
+                sleeve=None,
+                message=f"{slab_no}: 高さ記載あり ({', '.join(levels[:3])})",
+            ))
+        else:
+            results.append(CheckResult(
+                check_id=8,
+                check_name="基準レベル記載",
+                severity="NG",
+                sleeve=None,
+                message=f"{slab_no}: 高さ記載なし",
+            ))
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +363,8 @@ def check_lower_wall(
         wtype = wall.wall_type
 
         # Determine threshold
-        if wtype in ("RC壁", "RC"):
-            # RC exterior surface lines — sleeve edge to surface
+        if wtype in ("RC壁", "RC", "仕上"):
+            # Surface lines (RC structure / wall finish) — sleeve edge to surface
             threshold = sleeve.diameter / 2.0
         else:
             # Normalize wall type key for lookup
@@ -256,29 +410,21 @@ def check_lower_wall(
 def check_step_slab(
     sleeve: Sleeve,
     step_lines: list[StepLine],
-    threshold: float | None,
 ) -> list[CheckResult]:
-    """Check #7: sleeve proximity to slab step lines."""
-    if threshold is None:
-        return [CheckResult(
-            check_id=7,
-            check_name="段差近接",
-            severity="OK",
-            sleeve=sleeve,
-            message="しきい値未設定（スキップ）",
-        )]
-
+    """Check #7: sleeve must not overlap with slab step lines."""
     results: list[CheckResult] = []
+    radius = sleeve.diameter / 2.0
 
     for step in step_lines:
         dist = point_to_segment_distance(sleeve.center, step.start, step.end)
-        if dist < threshold:
+        edge_dist = dist - radius
+        if edge_dist <= 0:
             results.append(CheckResult(
                 check_id=7,
                 check_name="段差近接",
-                severity="WARNING",
+                severity="NG",
                 sleeve=sleeve,
-                message=f"段差線との距離 {dist:.1f}mm < しきい値 {threshold:.1f}mm",
+                message=f"スリーブ端が段差線に重なっている（端から段差線まで {edge_dist:.1f}mm）",
                 related_coords=[sleeve.center, step.start, step.end],
             ))
 
@@ -288,7 +434,7 @@ def check_step_slab(
             check_name="段差近接",
             severity="OK",
             sleeve=sleeve,
-            message="段差線との近接なし",
+            message="段差線との干渉なし",
         ))
 
     return results
@@ -308,9 +454,9 @@ def check_step_dim(
     """Check #10: sleeve-related dims must not originate from a step line.
 
     For each dimension whose defpoint2 or defpoint3 is near the sleeve
-    centre, check whether that sleeve-side defpoint sits on a step line.
-    If so, the dimension is measuring from a step (formwork edge) rather
-    than from a reliable reference — flag as NG.
+    centre, check whether the *other* (reference-side) defpoint sits on
+    a step line.  If so, the dimension is measuring FROM a step/recess
+    rather than from a reliable reference — flag as NG.
     """
     if not step_lines:
         return [CheckResult(
@@ -332,21 +478,21 @@ def check_step_dim(
         if not dp2_match and not dp3_match:
             continue
 
-        # Check the sleeve-side defpoint(s) against step lines
-        sleeve_pts = []
+        # Check the reference-side (non-sleeve) defpoint against step lines
+        ref_pts = []
         if dp2_match:
-            sleeve_pts.append(dim.defpoint2)
+            ref_pts.append(dim.defpoint3)  # dp2 is sleeve-side → dp3 is reference
         if dp3_match:
-            sleeve_pts.append(dim.defpoint3)
+            ref_pts.append(dim.defpoint2)  # dp3 is sleeve-side → dp2 is reference
 
-        for pt in sleeve_pts:
+        for pt in ref_pts:
             if point_on_any_segment(pt, step_segs, step_tolerance):
                 results.append(CheckResult(
                     check_id=10,
                     check_name="段差基準寸法",
                     severity="NG",
                     sleeve=sleeve,
-                    message=f"スリーブ寸法の基点が段差線上: {pt}",
+                    message=f"寸法の参照点が段差線上: {pt}",
                     related_coords=[pt, sleeve.center],
                 ))
 
@@ -367,51 +513,39 @@ def check_step_dim(
 # ---------------------------------------------------------------------------
 
 def check_sleeve_center_dim(
-    dim: DimLine,
     sleeves: list[Sleeve],
-    tolerance: float = 5.0,
+    x_resolved: dict[str, bool] | None,
+    y_resolved: dict[str, bool] | None,
 ) -> list[CheckResult]:
-    """Check #11: dimension must not span directly between two sleeve centres."""
-    dp1_sleeve = next(
-        (s for s in sleeves if points_match(dim.defpoint1, s.center, tolerance)),
-        None,
-    )
-    if dp1_sleeve is None:
-        return [CheckResult(
-            check_id=11,
-            check_name="スリーブ芯寸法",
-            severity="OK",
-            sleeve=None,
-            message="スリーブ間寸法なし",
-        )]
+    """Check #11: sleeve dims must trace back to a grid line, not only to other sleeves."""
+    results: list[CheckResult] = []
+    for s in sleeves:
+        x_ok = x_resolved[s.id] if x_resolved is not None else True
+        y_ok = y_resolved[s.id] if y_resolved is not None else True
 
-    dp2_sleeve = next(
-        (
-            s for s in sleeves
-            if s is not dp1_sleeve and points_match(dim.defpoint2, s.center, tolerance)
-        ),
-        None,
-    )
-    if dp2_sleeve is not None:
-        return [CheckResult(
-            check_id=11,
-            check_name="スリーブ芯寸法",
-            severity="NG",
-            sleeve=dp1_sleeve,
-            message=(
-                f"スリーブ芯間の寸法が記載されています: "
-                f"{dp1_sleeve.id} ↔ {dp2_sleeve.id}"
-            ),
-            related_coords=[dim.defpoint1, dim.defpoint2],
-        )]
-
-    return [CheckResult(
-        check_id=11,
-        check_name="スリーブ芯寸法",
-        severity="OK",
-        sleeve=None,
-        message="スリーブ間寸法なし",
-    )]
+        if x_ok and y_ok:
+            results.append(CheckResult(
+                check_id=11,
+                check_name="スリーブ芯寸法",
+                severity="OK",
+                sleeve=s,
+                message="寸法チェーンが通り芯に帰着",
+            ))
+        else:
+            missing = []
+            if not x_ok:
+                missing.append("X")
+            if not y_ok:
+                missing.append("Y")
+            results.append(CheckResult(
+                check_id=11,
+                check_name="スリーブ芯寸法",
+                severity="NG",
+                sleeve=s,
+                message=f"{'・'.join(missing)}方向の寸法が通り芯に帰着しない（スリーブ芯のみ）",
+                related_coords=[s.center],
+            ))
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -419,28 +553,65 @@ def check_sleeve_center_dim(
 # ---------------------------------------------------------------------------
 
 def check_column_wall_dim(
-    dim: DimLine,
+    sleeve: Sleeve,
+    dims: list[DimLine],
     column_lines: list[ColumnLine],
-    tolerance: float = 5.0,
+    sleeve_tolerance: float = 50.0,
+    col_tolerance: float = 5.0,
 ) -> list[CheckResult]:
-    """Check #12: dimension defpoint1 must not lie on a column/wall-finish line."""
-    segments = [(c.start, c.end) for c in column_lines]
-    if point_on_any_segment(dim.defpoint1, segments, tolerance):
+    """Check #12: sleeve offset dims must not reference a column/wall-finish line.
+
+    For each dimension whose defpoint2 or defpoint3 is near the sleeve
+    centre, check whether the *other* (reference-side) defpoint sits on
+    a column or wall-finish line.  If so, the dimension is measuring
+    FROM a column/wall face rather than from a grid line — flag as NG.
+    """
+    if not column_lines:
         return [CheckResult(
             check_id=12,
             check_name="柱・壁仕上寸法",
-            severity="NG",
-            sleeve=None,
-            message=f"寸法基点が柱・壁仕上線上にあります: {dim.defpoint1}",
-            related_coords=[dim.defpoint1],
+            severity="OK",
+            sleeve=sleeve,
+            message="柱・壁仕上線なし（スキップ）",
         )]
-    return [CheckResult(
-        check_id=12,
-        check_name="柱・壁仕上寸法",
-        severity="OK",
-        sleeve=None,
-        message="柱・壁仕上線上の寸法基点なし",
-    )]
+
+    segments = [(c.start, c.end) for c in column_lines]
+    results: list[CheckResult] = []
+
+    for dim in dims:
+        dp2_match = points_match(dim.defpoint2, sleeve.center, sleeve_tolerance)
+        dp3_match = points_match(dim.defpoint3, sleeve.center, sleeve_tolerance)
+
+        if not dp2_match and not dp3_match:
+            continue
+
+        ref_pts = []
+        if dp2_match:
+            ref_pts.append(dim.defpoint3)
+        if dp3_match:
+            ref_pts.append(dim.defpoint2)
+
+        for pt in ref_pts:
+            if point_on_any_segment(pt, segments, col_tolerance):
+                results.append(CheckResult(
+                    check_id=12,
+                    check_name="柱・壁仕上寸法",
+                    severity="NG",
+                    sleeve=sleeve,
+                    message=f"寸法の参照点が柱・壁仕上線上: {pt}",
+                    related_coords=[pt, sleeve.center],
+                ))
+
+    if not results:
+        results.append(CheckResult(
+            check_id=12,
+            check_name="柱・壁仕上寸法",
+            severity="OK",
+            sleeve=sleeve,
+            message="柱・壁仕上線上の寸法基点なし",
+        ))
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +639,8 @@ def check_dim_sum(
     h_grids = sorted([g for g in grids if g.direction == "H"], key=lambda g: g.position)
 
     CHAIN_GAP = 50.0      # max gap between adjacent dims in a chain
-    GRID_SNAP = 200.0     # max distance from chain end to grid line
+    GRID_SNAP_STRICT = 5.0   # chain endpoint snapped to grid (Case A)
+    GRID_SNAP_LOOSE = 300.0  # chain near grid but not snapped (Case B)
     SUM_TOLERANCE = 5.0   # mm
     GROUP_BIN = 50.0      # bin size for grouping dim line positions
 
@@ -479,6 +651,44 @@ def check_dim_sum(
             return None, float("inf")
         best = min(grid_list, key=lambda g: abs(g.position - pos))
         return best, abs(best.position - pos)
+
+    def _split_chain_at_grids(
+        chain: list[DimLine],
+        get_start: callable,
+        get_end: callable,
+        grid_list: list[GridLine],
+    ) -> list[list[DimLine]]:
+        """Split a continuous chain at grid line positions."""
+        if not grid_list or len(chain) < 2:
+            return [chain]
+
+        grid_positions = sorted(g.position for g in grid_list)
+        sub_chains: list[list[DimLine]] = []
+        current: list[DimLine] = [chain[0]]
+
+        for i in range(1, len(chain)):
+            prev_end = get_end(chain[i - 1])
+            curr_start = get_start(chain[i])
+            mid = (prev_end + curr_start) / 2.0
+
+            # Check if a grid line falls between prev dim end and curr dim start
+            crossed = any(
+                abs(gp - mid) < GRID_SNAP_LOOSE
+                and min(prev_end, curr_start) - CHAIN_GAP < gp < max(prev_end, curr_start) + CHAIN_GAP
+                for gp in grid_positions
+            )
+
+            if crossed:
+                if len(current) >= 2:
+                    sub_chains.append(current)
+                current = [chain[i]]
+            else:
+                current.append(chain[i])
+
+        if len(current) >= 2:
+            sub_chains.append(current)
+
+        return sub_chains
 
     def _detect_chains(
         dim_group: list[DimLine],
@@ -492,8 +702,8 @@ def check_dim_sum(
 
         dim_group.sort(key=lambda d: get_start(d))
 
-        # Build continuous chains
-        chains: list[list[DimLine]] = []
+        # Build continuous chains (gap < 50mm)
+        raw_chains: list[list[DimLine]] = []
         chain: list[DimLine] = [dim_group[0]]
 
         for i in range(1, len(dim_group)):
@@ -503,11 +713,16 @@ def check_dim_sum(
                 chain.append(dim_group[i])
             else:
                 if len(chain) >= 2:
-                    chains.append(chain)
+                    raw_chains.append(chain)
                 chain = [dim_group[i]]
 
         if len(chain) >= 2:
-            chains.append(chain)
+            raw_chains.append(chain)
+
+        # Split chains at grid line positions
+        chains: list[list[DimLine]] = []
+        for raw in raw_chains:
+            chains.extend(_split_chain_at_grids(raw, get_start, get_end, grid_list))
 
         # Check each chain against grid span
         for ch in chains:
@@ -522,24 +737,38 @@ def check_dim_sum(
                     or g_start.axis_label == g_end.axis_label):
                 continue
 
-            grid_span = abs(g_end.position - g_start.position)
-
-            # Only check chains that reasonably span between grids
-            if d_start > GRID_SNAP or d_end > GRID_SNAP:
+            # Skip chains too far from any grid
+            if d_start > GRID_SNAP_LOOSE or d_end > GRID_SNAP_LOOSE:
                 continue
 
+            grid_span = abs(g_end.position - g_start.position)
+
             if axis == "X":
-                # Horizontal chain: coords are (x_start, y_dimline), (x_end, y_dimline)
                 coords = [(chain_start, ch[0].defpoint1[1]),
                            (chain_end, ch[-1].defpoint1[1])]
             else:
-                # Vertical chain: coords are (x_dimline, y_start), (x_dimline, y_end)
                 coords = [(ch[0].defpoint1[0], chain_start),
                            (ch[-1].defpoint1[0], chain_end)]
 
-            # Build breakdown: each dim value listed, then sum vs grid
             dim_vals = " + ".join(f"{d.measurement:.0f}" for d in ch)
 
+            # Case B: chain near grid but not snapped
+            if d_start > GRID_SNAP_STRICT or d_end > GRID_SNAP_STRICT:
+                results.append(CheckResult(
+                    check_id=4,
+                    check_name="寸法合計",
+                    severity="WARNING",
+                    sleeve=None,
+                    message=(
+                        f"通り芯 {g_start.axis_label}–{g_end.axis_label} ({axis}) | "
+                        f"寸法チェーンが通り芯にスナップしていない "
+                        f"(始点差: {d_start:.0f}mm, 終点差: {d_end:.0f}mm)"
+                    ),
+                    related_coords=coords,
+                ))
+                continue
+
+            # Case A: properly snapped — compare sum vs grid span
             if abs(chain_sum - grid_span) <= SUM_TOLERANCE:
                 results.append(CheckResult(
                     check_id=4,
@@ -642,8 +871,8 @@ def check_position_determinacy(
     dims: list[DimLine],
     grids: list[GridLine],
     sleeve_margin: float = 30.0,
-    grid_tolerance: float = 100.0,
-) -> list[CheckResult]:
+    grid_tolerance: float = 0.0,
+) -> tuple[list[CheckResult], dict[str, bool] | None, dict[str, bool] | None]:
     """Check #9: each sleeve's position must be determinable from dimensions.
 
     For each axis (X via V-grids, Y via H-grids), a sleeve is "resolved" if:
@@ -775,11 +1004,10 @@ def check_position_determinacy(
 
         return resolved
 
-    results: list[CheckResult] = []
-    sleeve_map = {s.id: s for s in sleeves}
-
     x_resolved = _resolve_axis("X", v_grid_positions) if v_grid_positions else None
     y_resolved = _resolve_axis("Y", h_grid_positions) if h_grid_positions else None
+
+    results: list[CheckResult] = []
 
     for s in sleeves:
         x_ok = x_resolved[s.id] if x_resolved is not None else True
@@ -808,7 +1036,7 @@ def check_position_determinacy(
                 related_coords=[s.center],
             ))
 
-    return results
+    return results, x_resolved, y_resolved
 
 
 # ---------------------------------------------------------------------------
@@ -881,7 +1109,6 @@ def run_all_checks(
     floor_2f: FloorData,
     floor_1f: FloorData | None = None,
     wall_thickness: dict[str, float] | None = None,
-    step_threshold: float | None = None,
 ) -> list[CheckResult]:
     """
     Run all checks against the provided floor data.
@@ -895,9 +1122,6 @@ def run_all_checks(
     wall_thickness:
         Dict mapping wall type → thickness in mm.  Defaults to
         ``_DEFAULT_WALL_THICKNESS``.
-    step_threshold:
-        Minimum allowed distance (mm) between a sleeve and a step line
-        for check #7.  Pass None to skip.
 
     Returns
     -------
@@ -914,13 +1138,16 @@ def run_all_checks(
     for sleeve in floor_2f.sleeves:
         results.extend(check_discipline(sleeve))          # #2
         results.extend(check_diameter_label(sleeve))       # #3
-        results.extend(check_gradient(sleeve))             # #5
-        results.extend(check_fl_label(sleeve))             # #8
+        results.extend(check_gradient(sleeve, floor_2f.pn_labels, floor_2f.slab_zones, floor_2f.slab_labels, floor_2f.water_gradients))  # #5
+        # #8 is now a global check (check_base_level), not per-sleeve
         results.extend(check_sleeve_number(sleeve))        # #14
-        results.extend(check_step_slab(sleeve, floor_2f.step_lines, step_threshold))  # #7
+        results.extend(check_step_slab(sleeve, floor_2f.step_lines))  # #7
 
         if lower_walls:
             results.extend(check_lower_wall(sleeve, lower_walls, wall_thickness))  # #6
+
+    # --- Global level check ---
+    results.extend(check_base_level(floor_2f.slab_labels, floor_2f.has_base_level_def))  # #8
 
     # --- Global dim checks ---
     results.extend(check_dim_sum(floor_2f.dim_lines, floor_2f.grid_lines))   # #4
@@ -930,14 +1157,17 @@ def run_all_checks(
     for sleeve in floor_2f.sleeves:
         results.extend(check_step_dim(sleeve, floor_2f.dim_lines, floor_2f.step_lines))  # #10
 
-    # --- Per-dim checks ---
-    for dim in floor_2f.dim_lines:
-        results.extend(check_sleeve_center_dim(dim, floor_2f.sleeves))         # #11
-        results.extend(check_column_wall_dim(dim, floor_2f.column_lines))      # #12
+    # --- Per-sleeve dim checks (column/wall) ---
+    for sleeve in floor_2f.sleeves:
+        results.extend(check_column_wall_dim(sleeve, floor_2f.dim_lines, floor_2f.column_lines))  # #12
 
     # --- Position determinacy (graph-based) ---
-    results.extend(check_position_determinacy(
+    det_results, x_resolved, y_resolved = check_position_determinacy(
         floor_2f.sleeves, floor_2f.dim_lines, floor_2f.grid_lines,
-    ))  # #9
+    )
+    results.extend(det_results)  # #9
+    results.extend(check_sleeve_center_dim(
+        floor_2f.sleeves, x_resolved, y_resolved,
+    ))  # #11
 
     return results

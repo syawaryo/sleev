@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -51,13 +52,30 @@ app.add_middleware(
 
 DXF_DIR = Path("dxf_output")
 
-# Map filename stems to short IDs
-_FLOOR_ID_MAP: dict[str, str] = {
-    "1階床スリーブ図": "1f",
-    "2階床スリーブ図": "2f",
-}
+# Map filename stems to short IDs — built dynamically via _stem_to_floor_id()
+_FLOOR_ID_MAP: dict[str, str] = {}
 # Reverse map: id -> stem
-_ID_TO_STEM: dict[str, str] = {v: k for k, v in _FLOOR_ID_MAP.items()}
+_ID_TO_STEM: dict[str, str] = {}
+
+_RE_FLOOR = re.compile(r"(B?\d+)階")
+
+
+def _stem_to_floor_id(stem: str) -> str:
+    """Extract floor ID from filename stem (e.g. '2階床スリーブ図' → '2f')."""
+    m = _RE_FLOOR.search(stem)
+    if m:
+        raw = m.group(1)  # "B1", "1", "2", etc.
+        return raw.lower() + "f"
+    return stem
+
+
+# Pre-populate maps from existing DXF files on startup
+if DXF_DIR.exists():
+    for _f in DXF_DIR.glob("*.dxf"):
+        _s = _f.stem
+        _fid = _stem_to_floor_id(_s)
+        _FLOOR_ID_MAP[_s] = _fid
+        _ID_TO_STEM[_fid] = _s
 
 # ---------------------------------------------------------------------------
 # In-memory parse cache  {filepath_str: FloorData}
@@ -99,7 +117,8 @@ def _dict_to_floor_data(d: dict) -> FloorData:
     return FloorData(
         sleeves=[Sleeve(
             id=s["id"], center=tuple(s["center"]), diameter=s["diameter"],
-            label_text=s.get("label_text"), fl_text=s.get("fl_text"),
+            label_text=s.get("label_text"), diameter_text=s.get("diameter_text"),
+            fl_text=s.get("fl_text"),
             pn_number=s.get("pn_number"), layer=s.get("layer", ""),
             discipline=s.get("discipline", ""),
         ) for s in d.get("sleeves", [])],
@@ -137,6 +156,7 @@ def _dict_to_floor_data(d: dict) -> FloorData:
             arrow_verts=[tuple(v) for v in p.get("arrow_verts", [])],
         ) for p in d.get("pn_labels", [])],
         slab_level=d.get("slab_level"),
+        has_base_level_def=d.get("has_base_level_def", False),
     )
 
 
@@ -246,7 +266,6 @@ class CheckRequest(BaseModel):
     floor_2f_path: str | None = None
     floor_1f_path: str | None = None
     wall_thickness: dict[str, float] | None = None
-    step_threshold: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +281,10 @@ def list_floors() -> list[dict]:
     floors = []
     for dxf_file in sorted(DXF_DIR.glob("*.dxf")):
         stem = dxf_file.stem
-        floor_id = _FLOOR_ID_MAP.get(stem, stem)
+        floor_id = _FLOOR_ID_MAP.get(stem) or _stem_to_floor_id(stem)
+        # Register so it can be resolved later
+        _FLOOR_ID_MAP[stem] = floor_id
+        _ID_TO_STEM[floor_id] = stem
         floors.append(
             {
                 "id": floor_id,
@@ -285,11 +307,9 @@ async def upload_dxf(file: UploadFile = File(...), label: str = Form("")):
     content = await file.read()
     dest.write_bytes(content)
 
-    floor_id = _FLOOR_ID_MAP.get(stem, stem)
-    # Register in maps so it can be resolved by floor_id
-    if stem not in _FLOOR_ID_MAP:
-        _FLOOR_ID_MAP[stem] = floor_id
-        _ID_TO_STEM[floor_id] = stem
+    floor_id = _FLOOR_ID_MAP.get(stem) or _stem_to_floor_id(stem)
+    _FLOOR_ID_MAP[stem] = floor_id
+    _ID_TO_STEM[floor_id] = stem
 
     # Clear cache for this file if it was previously parsed
     key = str(dest.resolve())
@@ -328,7 +348,6 @@ def run_checks(request: CheckRequest) -> dict:
         floor_2f=floor_2f,
         floor_1f=floor_1f,
         wall_thickness=request.wall_thickness,
-        step_threshold=request.step_threshold,
     )
 
     results_list = [_check_result_to_dict(cr) for cr in check_results]
