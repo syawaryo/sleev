@@ -9,7 +9,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq) => {
+          proxy.on('proxyReq', () => {
             // Remove content-length limit
           });
         },

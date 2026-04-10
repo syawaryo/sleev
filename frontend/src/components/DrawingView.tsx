@@ -39,7 +39,6 @@ const DISC_COLORS: Record<string, string> = {
 };
 
 const INITIAL_VB = { x: -5000, y: -40000, w: 90000, h: 45000 };
-const ZOOM_FACTOR = 1.04;
 const MIN_ZOOM_W = 5000;
 const MAX_ZOOM_W = 200000;
 
