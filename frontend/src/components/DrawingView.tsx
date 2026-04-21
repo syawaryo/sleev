@@ -40,16 +40,63 @@ const DISC_COLORS: Record<string, string> = {
 
 const INITIAL_VB = { x: -5000, y: -40000, w: 90000, h: 45000 };
 const MIN_ZOOM_W = 5000;
-const MAX_ZOOM_W = 200000;
+const MAX_ZOOM_W = 500000;
+
+type ViewBox = { x: number; y: number; w: number; h: number };
 
 export default function DrawingView({
   floorData, lowerFloorData, results, onSleeveHover, onSleeveClick,
   selectedSleeveId, layers, colorMode, navigateTarget, onNavigated, highlightCoords,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [vb, setVb] = useState(INITIAL_VB);
+  const [vb, setVb] = useState<ViewBox>(INITIAL_VB);
   const [isPanning, setIsPanning] = useState(false);
-  const panStart = useRef<{ x: number; y: number; vb: typeof INITIAL_VB } | null>(null);
+  const panStart = useRef<{ x: number; y: number; vb: ViewBox } | null>(null);
+
+  // Bounds of all drawable entities in world-coord space.
+  const dataBounds = useMemo(() => {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const s of floorData.sleeves) { xs.push(s.center[0]); ys.push(s.center[1]); }
+    for (const g of floorData.grid_lines) {
+      if (g.direction === "H") ys.push(g.position);
+      else xs.push(g.position);
+    }
+    for (const w of floorData.wall_lines) {
+      xs.push(w.start[0], w.end[0]); ys.push(w.start[1], w.end[1]);
+    }
+    for (const c of floorData.column_lines) {
+      xs.push(c.start[0], c.end[0]); ys.push(c.start[1], c.end[1]);
+    }
+    for (const o of floorData.slab_outlines || []) {
+      xs.push(o.start[0], o.end[0]); ys.push(o.start[1], o.end[1]);
+    }
+    if (xs.length === 0) return null;
+    return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+  }, [floorData]);
+
+  const fitVb = useCallback((): ViewBox => {
+    if (!dataBounds) return INITIAL_VB;
+    const { minX, maxX, minY, maxY } = dataBounds;
+    const pad = 0.08;
+    const spanX = (maxX - minX) || MIN_ZOOM_W;
+    const spanY = (maxY - minY) || MIN_ZOOM_W;
+    const w = Math.min(MAX_ZOOM_W, Math.max(MIN_ZOOM_W, spanX * (1 + pad * 2)));
+    const h = Math.min(MAX_ZOOM_W * 0.6, Math.max(MIN_ZOOM_W * 0.5, spanY * (1 + pad * 2)));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    // SVG y-axis is flipped via scale(1,-1), so viewBox.y = -cy - h/2.
+    return { x: cx - w / 2, y: -cy - h / 2, w, h };
+  }, [dataBounds]);
+
+  // Auto-fit the viewbox the first time we see a given floorData object.
+  const fittedFloorRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (floorData !== fittedFloorRef.current && dataBounds) {
+      fittedFloorRef.current = floorData;
+      setVb(fitVb());
+    }
+  }, [floorData, dataBounds, fitVb]);
 
   // Wheel zoom
   const vbRef = useRef(vb);
@@ -103,7 +150,7 @@ export default function DrawingView({
     panStart.current = null;
   }, []);
 
-  const handleDoubleClick = useCallback(() => setVb(INITIAL_VB), []);
+  const handleDoubleClick = useCallback(() => setVb(fitVb()), [fitVb]);
 
   // Navigate to target coordinates (from list view click)
   // Zoom to fit all highlight coords with padding
@@ -168,15 +215,23 @@ export default function DrawingView({
       onDoubleClick={handleDoubleClick}
     >
       <g transform="scale(1,-1)">
-        {/* Grid lines */}
-        {layers.grid && floorData.grid_lines.map((g, i) =>
-          g.direction === "H" ? (
-            <line key={`gh${i}`} x1={-5000} y1={g.position} x2={85000} y2={g.position}
+        {/* Grid lines — extend 8% beyond data bounds so axes run past edge sleeves */}
+        {layers.grid && floorData.grid_lines.map((g, i) => {
+          const b = dataBounds;
+          const padX = b ? (b.maxX - b.minX) * 0.08 + 2000 : 5000;
+          const padY = b ? (b.maxY - b.minY) * 0.08 + 2000 : 5000;
+          const x1 = b ? b.minX - padX : -5000;
+          const x2 = b ? b.maxX + padX : 85000;
+          const y1 = b ? b.minY - padY : -5000;
+          const y2 = b ? b.maxY + padY : 40000;
+          return g.direction === "H" ? (
+            <line key={`gh${i}`} x1={x1} y1={g.position} x2={x2} y2={g.position}
               stroke="#9ca3af" strokeWidth={15} strokeDasharray="300,150" />
           ) : (
-            <line key={`gv${i}`} x1={g.position} y1={-5000} x2={g.position} y2={40000}
+            <line key={`gv${i}`} x1={g.position} y1={y1} x2={g.position} y2={y2}
               stroke="#9ca3af" strokeWidth={15} strokeDasharray="300,150" />
-          )
+          );
+        }
         )}
 
         {/* Lower floor walls */}

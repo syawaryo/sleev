@@ -3,7 +3,7 @@ import type { FloorData, CheckResponse } from "./types";
 
 const BASE = "/api";
 
-export async function getFloors(): Promise<{id: string; name: string; path: string}[]> {
+export async function getFloors(): Promise<{id: string; name: string; path: string; source?: string}[]> {
   const res = await axios.get(`${BASE}/floors`);
   return res.data;
 }

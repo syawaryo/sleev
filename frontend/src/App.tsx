@@ -11,6 +11,7 @@ type ColorMode = "severity" | "fl" | "discipline";
 interface FloorEntry {
   id: string;
   label: string;
+  source: "dxf" | "ifc";
   data: FloorData | null;
   results: CheckResult[];
 }
@@ -38,7 +39,7 @@ function App() {
   const toggleLayer = (key: keyof typeof layers) =>
     setLayers((p) => ({ ...p, [key]: !p[key] }));
 
-  const activeFloor = floors[activeFloorIdx] || { id: "", label: "", data: null, results: [] };
+  const activeFloor: FloorEntry = floors[activeFloorIdx] || { id: "", label: "", source: "dxf", data: null, results: [] };
   const floorData = activeFloor.data;
   const results = activeFloor.results;
   const displaySleeve = hoveredSleeve || selectedSleeve;
@@ -53,6 +54,7 @@ function App() {
         setFloors(serverFloors.map((f) => ({
           id: f.id,
           label: f.name,
+          source: (f.source === "ifc" ? "ifc" : "dxf") as "dxf" | "ifc",
           data: null,
           results: [],
         })));
@@ -67,13 +69,14 @@ function App() {
       for (const file of Array.from(files)) {
         const res = await uploadDxf(file, "");
         setFloors((prev) => {
+          const entry: FloorEntry = { id: res.id, label: res.name, source: "dxf", data: null, results: [] };
           const exists = prev.findIndex((f) => f.id === res.id);
           if (exists >= 0) {
             const next = [...prev];
-            next[exists] = { id: res.id, label: res.name, data: null, results: [] };
+            next[exists] = entry;
             return next;
           }
-          return [...prev, { id: res.id, label: res.name, data: null, results: [] }];
+          return [...prev, entry];
         });
       }
     } catch (e) {
@@ -89,13 +92,14 @@ function App() {
     try {
       const res = await uploadIfc(ifcSleeveFile, ifcStructureFile, "");
       setFloors((prev) => {
+        const entry: FloorEntry = { id: res.id, label: res.name, source: "ifc", data: null, results: [] };
         const exists = prev.findIndex((f) => f.id === res.id);
         if (exists >= 0) {
           const next = [...prev];
-          next[exists] = { id: res.id, label: res.name, data: null, results: [] };
+          next[exists] = entry;
           return next;
         }
-        return [...prev, { id: res.id, label: res.name, data: null, results: [] }];
+        return [...prev, entry];
       });
       setIfcModalOpen(false);
       setIfcSleeveFile(null);
@@ -227,7 +231,16 @@ function App() {
                     background: activeFloorIdx === i ? "#fff" : "transparent",
                     color: activeFloorIdx === i ? "#111827" : "#9ca3af",
                     boxShadow: activeFloorIdx === i ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
-                  }}>{f.label}</button>
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                  }}>
+                  {f.label}
+                  <span style={{
+                    fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 3,
+                    background: f.source === "ifc" ? "#dbeafe" : "#f3f4f6",
+                    color: f.source === "ifc" ? "#1e40af" : "#6b7280",
+                    letterSpacing: 0.3,
+                  }}>{f.source.toUpperCase()}</span>
+                </button>
                 {!f.data && (
                   <button onClick={(e) => { e.stopPropagation(); handleRemoveFloor(i); }}
                     style={{ background: "none", border: "none", color: "#d1d5db", cursor: "pointer", fontSize: 10, padding: "0 4px", lineHeight: 1 }}
