@@ -16,6 +16,19 @@ export async function uploadDxf(file: File, label: string): Promise<{id: string;
   return res.data;
 }
 
+export async function uploadIfc(
+  sleeveIfc: File,
+  structureIfc: File | null,
+  label: string,
+): Promise<{id: string; name: string; label: string; path: string; source: string; has_structure: boolean}> {
+  const form = new FormData();
+  form.append("sleeve_ifc", sleeveIfc);
+  if (structureIfc) form.append("structure_ifc", structureIfc);
+  form.append("label", label);
+  const res = await axios.post(`${BASE}/upload_ifc`, form);
+  return res.data;
+}
+
 export async function parseFloor(floorId: string): Promise<FloorData> {
   const res = await axios.post(`${BASE}/parse`, { floor_id: floorId });
   return res.data;

@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import type { FloorData, Sleeve, CheckResult } from "./types";
-import { getFloors, parseFloor, runChecks, uploadDxf } from "./api";
+import { getFloors, parseFloor, runChecks, uploadDxf, uploadIfc } from "./api";
 import DrawingView from "./components/DrawingView";
 import SleeveInfo from "./components/SleeveInfo";
 import ListView from "./components/ListView";
@@ -31,6 +31,9 @@ function App() {
     grid: true, wall: true, step: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [ifcModalOpen, setIfcModalOpen] = useState(false);
+  const [ifcSleeveFile, setIfcSleeveFile] = useState<File | null>(null);
+  const [ifcStructureFile, setIfcStructureFile] = useState<File | null>(null);
 
   const toggleLayer = (key: keyof typeof layers) =>
     setLayers((p) => ({ ...p, [key]: !p[key] }));
@@ -78,6 +81,29 @@ function App() {
     }
     setLoading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleIfcSubmit = async () => {
+    if (!ifcSleeveFile) return;
+    setLoading(true);
+    try {
+      const res = await uploadIfc(ifcSleeveFile, ifcStructureFile, "");
+      setFloors((prev) => {
+        const exists = prev.findIndex((f) => f.id === res.id);
+        if (exists >= 0) {
+          const next = [...prev];
+          next[exists] = { id: res.id, label: res.name, data: null, results: [] };
+          return next;
+        }
+        return [...prev, { id: res.id, label: res.name, data: null, results: [] }];
+      });
+      setIfcModalOpen(false);
+      setIfcSleeveFile(null);
+      setIfcStructureFile(null);
+    } catch (e) {
+      console.error(e);
+    }
+    setLoading(false);
   };
 
   const handleRun = async () => {
@@ -216,6 +242,10 @@ function App() {
           style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
           + DXF追加
         </button>
+        <button onClick={() => setIfcModalOpen(true)} disabled={loading}
+          style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
+          + IFC追加
+        </button>
 
         {/* List mode filters */}
         {viewMode === "list" && (
@@ -302,6 +332,65 @@ function App() {
           </>
         )}
       </div>
+
+      {/* IFC upload modal */}
+      {ifcModalOpen && (
+        <div
+          onClick={() => !loading && setIfcModalOpen(false)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
+            zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 10, padding: 24, width: 460, boxShadow: "0 10px 40px rgba(0,0,0,0.15)" }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>IFCファイルをアップロード</div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 18 }}>
+              スリーブIFC（必須）と躯体IFC（任意）を指定してください。躯体IFCが無くても表示は可能ですが、一部チェック（下階壁干渉・段差等）は躯体IFC未提供扱いになります。
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>スリーブIFC <span style={{ color: "#dc2626" }}>*</span></div>
+              <input type="file" accept=".ifc"
+                onChange={(e) => setIfcSleeveFile(e.target.files?.[0] ?? null)}
+                style={{ fontSize: 12, width: "100%" }} />
+              {ifcSleeveFile && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{ifcSleeveFile.name}</div>
+              )}
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>躯体IFC（任意）</div>
+              <input type="file" accept=".ifc"
+                onChange={(e) => setIfcStructureFile(e.target.files?.[0] ?? null)}
+                style={{ fontSize: 12, width: "100%" }} />
+              {ifcStructureFile && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{ifcStructureFile.name}</div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                onClick={() => { if (!loading) { setIfcModalOpen(false); setIfcSleeveFile(null); setIfcStructureFile(null); } }}
+                disabled={loading}
+                style={{ padding: "6px 16px", fontSize: 12, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}
+              >キャンセル</button>
+              <button
+                onClick={handleIfcSubmit}
+                disabled={!ifcSleeveFile || loading}
+                style={{
+                  padding: "6px 16px", fontSize: 12, border: "none", borderRadius: 6,
+                  background: !ifcSleeveFile || loading ? "#d1d5db" : "#ff4b4b",
+                  color: "#fff", cursor: !ifcSleeveFile || loading ? "default" : "pointer",
+                  fontWeight: 500,
+                }}
+              >{loading ? "アップロード中..." : "アップロード"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main content */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>

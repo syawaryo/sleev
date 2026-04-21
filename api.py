@@ -25,6 +25,7 @@ from sleeve_checker.models import (
     ColumnLine, SlabZone, SlabLabel, SlabOutline, PnLabel,
 )
 from sleeve_checker.parser import parse_dxf
+from sleeve_checker.ifc_parser import parse_ifc
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -51,11 +52,14 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 DXF_DIR = Path("dxf_output")
+IFC_DIR = Path("ifc_output")
 
 # Map filename stems to short IDs — built dynamically via _stem_to_floor_id()
 _FLOOR_ID_MAP: dict[str, str] = {}
 # Reverse map: id -> stem
 _ID_TO_STEM: dict[str, str] = {}
+# floor_id -> (sleeve_ifc_path, structure_ifc_path_or_None)
+_IFC_SOURCES: dict[str, tuple[Path, Path | None]] = {}
 
 _RE_FLOOR = re.compile(r"(B?\d+)階")
 
@@ -76,6 +80,20 @@ if DXF_DIR.exists():
         _fid = _stem_to_floor_id(_s)
         _FLOOR_ID_MAP[_s] = _fid
         _ID_TO_STEM[_fid] = _s
+
+# Pre-populate IFC sources by scanning IFC_DIR/<floor_id>/sleeve.ifc on startup
+if IFC_DIR.exists():
+    for _sub in IFC_DIR.iterdir():
+        if not _sub.is_dir():
+            continue
+        _sleeve = _sub / "sleeve.ifc"
+        if not _sleeve.exists():
+            continue
+        _struct = _sub / "structure.ifc"
+        _fid = _sub.name
+        _IFC_SOURCES[_fid] = (_sleeve, _struct if _struct.exists() else None)
+        _ID_TO_STEM.setdefault(_fid, _fid)
+        _FLOOR_ID_MAP.setdefault(_fid, _fid)
 
 # ---------------------------------------------------------------------------
 # In-memory parse cache  {filepath_str: FloorData}
@@ -107,6 +125,22 @@ def _get_floor_path(floor_id: str | None, path: str | None) -> Path:
     raise HTTPException(
         status_code=422, detail="Provide either 'floor_id' or 'path'."
     )
+
+
+def _resolve_floor_data(floor_id: str | None, path: str | None) -> FloorData:
+    """Unified resolver: returns FloorData for either IFC or DXF sources."""
+    # IFC path: floor_id maps to a pair of IFC files
+    if floor_id and floor_id in _IFC_SOURCES:
+        cache_key = f"ifc::{floor_id}"
+        if cache_key in _parse_cache:
+            return _parse_cache[cache_key]
+        sleeve_p, struct_p = _IFC_SOURCES[floor_id]
+        fd = parse_ifc(sleeve_p, struct_p)
+        _parse_cache[cache_key] = fd
+        return fd
+    # DXF path (existing behaviour)
+    filepath = _get_floor_path(floor_id, path)
+    return _get_or_parse(filepath)
 
 
 CACHE_DIR = Path(".parse_cache")
@@ -274,24 +308,30 @@ class CheckRequest(BaseModel):
 
 @app.get("/api/floors")
 def list_floors() -> list[dict]:
-    """Return all available DXF files in dxf_output/."""
-    if not DXF_DIR.exists():
-        return []
+    """Return all available floors (DXF + IFC)."""
+    floors: list[dict] = []
 
-    floors = []
-    for dxf_file in sorted(DXF_DIR.glob("*.dxf")):
-        stem = dxf_file.stem
-        floor_id = _FLOOR_ID_MAP.get(stem) or _stem_to_floor_id(stem)
-        # Register so it can be resolved later
-        _FLOOR_ID_MAP[stem] = floor_id
-        _ID_TO_STEM[floor_id] = stem
-        floors.append(
-            {
+    if DXF_DIR.exists():
+        for dxf_file in sorted(DXF_DIR.glob("*.dxf")):
+            stem = dxf_file.stem
+            floor_id = _FLOOR_ID_MAP.get(stem) or _stem_to_floor_id(stem)
+            _FLOOR_ID_MAP[stem] = floor_id
+            _ID_TO_STEM[floor_id] = stem
+            floors.append({
                 "id": floor_id,
                 "name": stem,
                 "path": str(dxf_file).replace("\\", "/"),
-            }
-        )
+                "source": "dxf",
+            })
+
+    for fid, (sleeve_p, _struct_p) in _IFC_SOURCES.items():
+        floors.append({
+            "id": fid,
+            "name": _ID_TO_STEM.get(fid, fid),
+            "path": str(sleeve_p).replace("\\", "/"),
+            "source": "ifc",
+        })
+
     return floors
 
 
@@ -323,26 +363,64 @@ async def upload_dxf(file: UploadFile = File(...), label: str = Form("")):
     }
 
 
+@app.post("/api/upload_ifc")
+async def upload_ifc(
+    sleeve_ifc: UploadFile = File(...),
+    structure_ifc: UploadFile | None = File(None),
+    label: str = Form(""),
+):
+    """Upload a sleeve IFC (and optional structural IFC) and register as a floor."""
+    if not sleeve_ifc.filename or not sleeve_ifc.filename.lower().endswith(".ifc"):
+        raise HTTPException(status_code=400, detail="Sleeve IFC file (.ifc) required")
+
+    stem = Path(sleeve_ifc.filename).stem
+    base_id = _stem_to_floor_id(stem)
+    # Disambiguate from DXF namespace so the same stem doesn't clobber an existing DXF
+    floor_id = f"{base_id}-ifc"
+
+    IFC_DIR.mkdir(exist_ok=True)
+    folder = IFC_DIR / floor_id
+    folder.mkdir(exist_ok=True)
+
+    sleeve_path = folder / "sleeve.ifc"
+    sleeve_path.write_bytes(await sleeve_ifc.read())
+
+    structure_path: Path | None = None
+    if structure_ifc is not None and structure_ifc.filename:
+        if not structure_ifc.filename.lower().endswith(".ifc"):
+            raise HTTPException(status_code=400, detail="Structure IFC must be .ifc")
+        structure_path = folder / "structure.ifc"
+        structure_path.write_bytes(await structure_ifc.read())
+
+    _IFC_SOURCES[floor_id] = (sleeve_path, structure_path)
+    _ID_TO_STEM[floor_id] = stem
+    _parse_cache.pop(f"ifc::{floor_id}", None)
+
+    return {
+        "id": floor_id,
+        "name": stem,
+        "label": label or stem,
+        "path": str(sleeve_path).replace("\\", "/"),
+        "source": "ifc",
+        "has_structure": structure_path is not None,
+    }
+
+
 @app.post("/api/parse")
 def parse_floor(request: ParseRequest) -> dict:
-    """Parse a DXF file and return FloorData as JSON (result is cached)."""
-    filepath = _get_floor_path(request.floor_id, request.path)
-    floor_data = _get_or_parse(filepath)
+    """Parse a floor (DXF or IFC) and return FloorData as JSON (result is cached)."""
+    floor_data = _resolve_floor_data(request.floor_id, request.path)
     return _floor_data_to_dict(floor_data)
 
 
 @app.post("/api/check")
 def run_checks(request: CheckRequest) -> dict:
     """Run all sleeve checks and return results with a summary."""
-    # Resolve 2F path (required)
-    floor_2f_path = _get_floor_path(request.floor_2f_id, request.floor_2f_path)
-    floor_2f = _get_or_parse(floor_2f_path)
+    floor_2f = _resolve_floor_data(request.floor_2f_id, request.floor_2f_path)
 
-    # Resolve 1F path (optional — for lower-wall check)
     floor_1f: FloorData | None = None
     if request.floor_1f_id is not None or request.floor_1f_path is not None:
-        floor_1f_path = _get_floor_path(request.floor_1f_id, request.floor_1f_path)
-        floor_1f = _get_or_parse(floor_1f_path)
+        floor_1f = _resolve_floor_data(request.floor_1f_id, request.floor_1f_path)
 
     check_results = run_all_checks(
         floor_2f=floor_2f,
