@@ -173,28 +173,11 @@ def _extract_grids(f) -> list[GridLine]:
 
 
 # ---------------------------------------------------------------------------
-# Synthesis: fill in DXF-notation fields from IFC geometry so the checks that
-# expect drawing annotations (dim_lines, pn_number) have something real to work
-# with. IFC carries the same semantic truth as the annotations — these helpers
-# just translate it into the shape checks.py was written for.
+# Synthesis: translate IFC geometry into the DXF-notation fields checks.py
+# expects, BUT only when IFC actually carries the underlying fact. If the IFC
+# doesn't carry the information at all (e.g. construction-side P-N numbers),
+# we leave the field blank so the check can report the missing data honestly.
 # ---------------------------------------------------------------------------
-
-def _assign_pn_numbers(sleeves: list[Sleeve]) -> None:
-    """Auto-number sleeves in row-major order (top→bottom, then left→right).
-
-    IFC has no drafter-assigned P-N numbers; we synthesise them from position so
-    check #14 has something to validate. Deterministic on stable input.
-    """
-    # Sort by Y descending (top row first), then X ascending. Tolerance-bin
-    # the Y coordinate so sleeves within ~100mm are grouped as one "row".
-    BAND = 100.0
-    enumerated = sorted(
-        enumerate(sleeves),
-        key=lambda it: (-round(it[1].center[1] / BAND), it[1].center[0]),
-    )
-    for new_idx, (_, s) in enumerate(enumerated, start=1):
-        s.pn_number = f"P-N-{new_idx}"
-
 
 def _synthesize_grid_dims(sleeves: list[Sleeve], grids: list[GridLine]) -> list[DimLine]:
     """Create one horizontal + one vertical DimLine per sleeve, anchored to its
@@ -264,9 +247,11 @@ def parse_ifc(sleeve_path: str | Path, structure_path: str | Path | None = None)
         if struct_p.exists():
             _ = ifcopenshell.open(str(struct_p))  # loaded, not yet mined
 
-    # Synthesis: fill notation-side fields that IFC doesn't carry natively but
-    # whose semantic equivalents can be derived from geometry.
-    _assign_pn_numbers(sleeves)
+    # Synthesis: fill notation-side fields whose semantic truth the IFC
+    # already carries (geometry, grid placement). P-N numbers are NOT
+    # synthesised because Tfas IFC doesn't carry construction-side P-N
+    # labels — leaving pn_number=None lets check #14 report the missing
+    # information honestly instead of auto-passing on fabricated data.
     dim_lines = _synthesize_grid_dims(sleeves, grid_lines)
 
     # IFCBuildingStorey carries Elevation natively, so the "base level is
