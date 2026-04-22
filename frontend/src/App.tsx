@@ -1,9 +1,10 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { FloorData, Sleeve, CheckResult } from "./types";
 import { getFloors, parseFloor, runChecks, uploadDxf, uploadDwg, uploadIfc } from "./api";
 import DrawingView from "./components/DrawingView";
 import SleeveInfo from "./components/SleeveInfo";
 import ListView from "./components/ListView";
+import DataExplorer from "./components/DataExplorer";
 import * as pdfjs from "pdfjs-dist";
 
 // Vite bundles the worker URL for us; pdf.js requires this or it falls back
@@ -26,7 +27,7 @@ async function pdfFileToDataUrl(file: File): Promise<string> {
   return canvas.toDataURL("image/png");
 }
 
-type ViewMode = "drawing" | "list";
+type ViewMode = "drawing" | "list" | "data";
 type ColorMode = "severity" | "fl" | "discipline";
 
 interface FloorEntry {
@@ -50,7 +51,7 @@ function App() {
   const [highlightCoords, setHighlightCoords] = useState<[number, number][]>([]);
   const [openChecks, setOpenChecks] = useState<Set<number>>(new Set());
   const [layers, setLayers] = useState({
-    grid: true, wall: true, outerWall: true, step: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false,
+    grid: true, wall: true, outerWall: true, step: true, recess: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false,
   });
   const [sleeveFilters, setSleeveFilters] = useState({
     衛生: true, 空調: true, 電気: true, その他: true,
@@ -235,26 +236,6 @@ function App() {
     }
   };
 
-  // Sleeve-level summary
-  const sleeveSummary = useMemo(() => {
-    if (!floorData) return null;
-    const worst = new Map<string, string>();
-    for (const r of results) {
-      if (!r.sleeve_id) continue;
-      const cur = worst.get(r.sleeve_id);
-      if (!cur || r.severity === "NG" || (r.severity === "WARNING" && cur === "OK")) {
-        worst.set(r.sleeve_id, r.severity);
-      }
-    }
-    let ng = 0, warn = 0, ok = 0;
-    for (const v of worst.values()) {
-      if (v === "NG") ng++;
-      else if (v === "WARNING") warn++;
-      else ok++;
-    }
-    return { total: floorData.sleeves.length, ng, warning: warn, ok };
-  }, [floorData, results]);
-
   const hasData = floors.some((f) => f.data !== null);
 
   return (
@@ -267,7 +248,7 @@ function App() {
 
         {/* View toggle */}
         <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 7, padding: 2, gap: 2, fontSize: 12, marginLeft: 12 }}>
-          {([["list", "一覧"], ["drawing", "図面"]] as const).map(([mode, label]) => (
+          {([["list", "一覧"], ["drawing", "図面"], ["data", "データ"]] as const).map(([mode, label]) => (
             <button key={mode} onClick={() => setViewMode(mode)}
               style={{
                 padding: "4px 14px", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: viewMode === mode ? 500 : 400,
@@ -299,15 +280,6 @@ function App() {
           </button>
         )}
 
-        {/* Summary */}
-        {sleeveSummary && (
-          <div style={{ marginLeft: "auto", display: "flex", gap: 6, fontSize: 11, alignItems: "center" }}>
-            <span style={{ color: "#9ca3af" }}>{sleeveSummary.total} スリーブ</span>
-            <span style={{ background: "#fef2f2", color: "#dc2626", padding: "1px 8px", borderRadius: 4, fontWeight: 600 }}>{sleeveSummary.ng} NG</span>
-            <span style={{ background: "#fffbeb", color: "#d97706", padding: "1px 8px", borderRadius: 4, fontWeight: 600 }}>{sleeveSummary.warning} WARN</span>
-            <span style={{ background: "#f0fdf4", color: "#16a34a", padding: "1px 8px", borderRadius: 4, fontWeight: 600 }}>{sleeveSummary.ok} OK</span>
-          </div>
-        )}
       </div>
 
       {/* Hidden file inputs (always rendered) */}
@@ -398,7 +370,8 @@ function App() {
               ["grid", "通り芯"],
               ["wall", "壁"],
               ["outerWall", "外壁"],
-              ["step", "段差線"],
+              ["step", "スラブ段差"],
+              ["recess", "床ヌスミ"],
               ["column", "柱・仕上"],
               ["dim", "寸法"],
               ["slabLevel", "スラブレベル"],
@@ -645,6 +618,29 @@ function App() {
               )}
             </div>
           </>
+        ) : viewMode === "data" ? (
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            {floorData ? (
+              <DataExplorer
+                floorData={floorData}
+                onNavigate={(coords, sleeveId) => {
+                  setViewMode("drawing");
+                  setNavigateTarget(coords);
+                  setHighlightCoords([]);
+                  if (sleeveId) {
+                    const sleeve = floorData?.sleeves.find(s => s.id === sleeveId);
+                    if (sleeve) setSelectedSleeve(sleeve);
+                  } else {
+                    setSelectedSleeve(null);
+                  }
+                }}
+              />
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
+                「チェック実行」を押してください
+              </div>
+            )}
+          </div>
         ) : (
           <div style={{ flex: 1, overflow: "auto" }}>
             {floorData ? (

@@ -64,7 +64,7 @@ interface StaticLayersProps {
 }
 
 const StaticLayers = memo(function StaticLayers({
-  floorData, lowerFloorData, layers, dataBounds,
+  floorData, lowerFloorData, layers,
 }: StaticLayersProps) {
   // Pre-compute outer-wall classification once (regex in render loop is wasteful).
   const wallIsOuter = useMemo(
