@@ -587,13 +587,47 @@ def _extract_grid_lines(doc, msp) -> list[GridLine]:
             if all(abs(pos - p) > _V_DEDUP for p in v_positions):
                 v_positions.append(pos)
 
+    # Collect TEXT / MTEXT labels drawn on the same grid layers. The drafter
+    # puts these inside circle bubbles at the ends of each axis — e.g. 'A'..'F'
+    # for horizontal axes, '1'..'8' for vertical axes.
+    label_texts: list[tuple[str, float, float]] = []
+    for e in msp:
+        if e.dxf.layer not in set(grid_layers):
+            continue
+        if e.dxftype() == "TEXT":
+            txt = (e.dxf.text or "").strip()
+            pos = e.dxf.insert
+            if txt:
+                label_texts.append((txt, float(pos.x), float(pos.y)))
+        elif e.dxftype() == "MTEXT":
+            txt = (e.text or "").strip()
+            pos = e.dxf.insert
+            if txt:
+                label_texts.append((txt, float(pos.x), float(pos.y)))
+
+    _LABEL_TOL = 500.0  # mm — bubble text typically sits ≤100mm off the axis
+
+    def _label_for(pos_val: float, axis: str, fallback: str) -> str:
+        """Pick the TEXT closest to `pos_val` along `axis` ('H' or 'V')."""
+        best_txt, best_d = None, 1e18
+        for txt, tx, ty in label_texts:
+            d = abs(ty - pos_val) if axis == "H" else abs(tx - pos_val)
+            if d < best_d and d <= _LABEL_TOL:
+                best_d, best_txt = d, txt
+        return best_txt if best_txt is not None else fallback
+
     grid_lines: list[GridLine] = []
 
     for i, pos in enumerate(sorted(h_positions)):
-        grid_lines.append(GridLine(axis_label=str(i + 1), direction="H", position=pos))
-
+        grid_lines.append(GridLine(
+            axis_label=_label_for(pos, "H", str(i + 1)),
+            direction="H", position=pos,
+        ))
     for i, pos in enumerate(sorted(v_positions)):
-        grid_lines.append(GridLine(axis_label=str(i + 1), direction="V", position=pos))
+        grid_lines.append(GridLine(
+            axis_label=_label_for(pos, "V", str(i + 1)),
+            direction="V", position=pos,
+        ))
 
     return grid_lines
 
@@ -646,6 +680,10 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
     wall_layers = _find_layers_any(doc, wall_keywords)
 
     def _wall_type(layer_name: str) -> str:
+        # Exterior wall detection takes precedence so "既存躯体外壁" and any
+        # other layer whose name contains 外壁 groups together under "外壁".
+        if "外壁" in layer_name:
+            return "外壁"
         if "壁心" in layer_name or "C151" in layer_name:
             return "壁心"
         if "RC壁" in layer_name or "F105" in layer_name or "F106" in layer_name:
@@ -666,8 +704,6 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
             return "CB"
         if "耐火被覆" in layer_name or "A561" in layer_name:
             return "耐火被覆"
-        if "既存躯体外壁" in layer_name:
-            return "RC壁"
         return "不明"
 
     wall_lines: list[WallLine] = []
