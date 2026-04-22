@@ -14,6 +14,14 @@ export default function SleeveInfo({ sleeve, results }: Props) {
   // Extract only the leading alphanumeric discipline code from label_text (e.g. "G(低) 225φ" → "G")
   const disciplineCode = sleeve.label_text?.match(/^[A-Za-z0-9]+/)?.[0] || null;
 
+  const SLEEVE_TYPE_LABEL: Record<string, string> = {
+    duct: "ダクト",
+    pipe: "配管",
+    cable: "電気",
+  };
+  const typeLabel = sleeve.sleeve_type ? SLEEVE_TYPE_LABEL[sleeve.sleeve_type] : null;
+  const shapeLabel = sleeve.shape === "rect" ? "角" : "丸";
+
   const worst = ngResults.length > 0 ? "NG" : warnResults.length > 0 ? "WARNING" : "OK";
   const badgeStyle: Record<string, { bg: string; color: string }> = {
     NG: { bg: "#fef2f2", color: "#dc2626" },
@@ -36,9 +44,15 @@ export default function SleeveInfo({ sleeve, results }: Props) {
       {/* Properties */}
       <div style={{ padding: "12px 16px", borderBottom: "1px solid #f3f4f6" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
-          <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>径</div><div style={{ color: "#111827", fontWeight: 600 }}>{sleeve.diameter}mm</div></div>
+          <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>形状/寸法</div><div style={{ color: "#111827", fontWeight: 600 }}>
+            {sleeve.shape === "rect" && sleeve.width && sleeve.height
+              ? `${shapeLabel} ${Math.round(sleeve.width)}×${Math.round(sleeve.height)}mm`
+              : `${shapeLabel} ${sleeve.diameter}mm`}
+          </div></div>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>FL</div><div style={{ color: "#111827", fontWeight: 600 }}>{sleeve.fl_text || "-"}</div></div>
-          <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>種別</div><div style={{ color: "#374151" }}>{disciplineCode || "-"}</div></div>
+          <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>種別</div><div style={{ color: "#374151" }}>
+            {typeLabel ? `${typeLabel} (${disciplineCode})` : (disciplineCode || "-")}
+          </div></div>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>座標</div><div style={{ color: "#374151", fontSize: 11 }}>({sleeve.center[0].toFixed(0)}, {sleeve.center[1].toFixed(0)})</div></div>
         </div>
       </div>

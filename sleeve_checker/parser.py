@@ -48,11 +48,48 @@ _RE_FL = re.compile(r"FL\s*[+\-]\s*\d+", re.IGNORECASE)
 
 # Known equipment/pipe type codes (whitelist)
 _RE_EQUIP_CODE = re.compile(
-    r"^(RD|KD|KV|SD|CW[WRN]?|CDW|SP[D]?|EA|G\(|N2|CX|HS|WD|HR|CH[R]?|"
+    r"^(RD|KD|KDK|KV|SD|CW[WRN]?|CDW|SP[D]?|EA|G\(|N2|CX|HS|WD|HR|CH[R]?|"
     r"CR|XS|OA|KEA|RA|SA|SOA|D:|C:|H:|V:|W:|R:|"
     r"P-UP)",
     re.IGNORECASE,
 )
+
+# ---------------------------------------------------------------------------
+# Equipment code → sleeve_type classification
+#
+#   "duct"   : air-handling ducts (空調/排煙ダクト)
+#   "pipe"   : water / drain pipes (配管)
+#   "cable"  : electrical pipes, cable racks (電気/ケーブルラック)
+#   ""       : unknown / no code
+#
+# Codes are matched against the start of the attached label_text (the
+# equipment code conventionally appears at the head of the annotation).
+# ---------------------------------------------------------------------------
+_SLEEVE_TYPE_DUCT = re.compile(
+    r"^(EA|OA|SA|RA|KEA|SOA|SOA2?|EA2?|RA2?|SA2?)\b", re.IGNORECASE
+)
+_SLEEVE_TYPE_PIPE = re.compile(
+    r"^(CW[WRN]?|CDW|RD|SD|SP[D]?|W:|HW|HR|CH[R]?|HS|WD|CX|N2|G\()",
+    re.IGNORECASE,
+)
+_SLEEVE_TYPE_CABLE = re.compile(r"^(XS|KD|KDK|KV|CR)\b", re.IGNORECASE)
+
+
+def _classify_sleeve_type(label_text: str | None) -> str:
+    """Map the equipment code in *label_text* to a sleeve sub-type.
+
+    Returns "duct" / "pipe" / "cable" / "" (unclassified).
+    """
+    if not label_text:
+        return ""
+    lt = label_text.strip()
+    if _SLEEVE_TYPE_DUCT.match(lt):
+        return "duct"
+    if _SLEEVE_TYPE_PIPE.match(lt):
+        return "pipe"
+    if _SLEEVE_TYPE_CABLE.match(lt):
+        return "cable"
+    return ""
 
 # ---------------------------------------------------------------------------
 # Layer-lookup helpers
@@ -107,6 +144,26 @@ def _in_building_range(x: float, y: float) -> bool:
     )
 
 
+def _resolve_entity_color(doc, entity) -> int | None:
+    """
+    Return the effective ACI color index of *entity* (1-255), or None if
+    unknown.  Handles BYLAYER (256) by looking up the layer's color, and
+    treats BYBLOCK (0) as "inherit" (returns None when we have no block
+    context to inherit from).
+    """
+    raw = getattr(entity.dxf, "color", 256)
+    if raw in (0, None):
+        return None  # BYBLOCK with no block context
+    if raw == 256:
+        layer_name = getattr(entity.dxf, "layer", "")
+        layer = doc.layers.get(layer_name) if layer_name else None
+        if layer is None:
+            return None
+        layer_color = getattr(layer.dxf, "color", 7)
+        return layer_color if layer_color > 0 else None
+    return int(raw)
+
+
 def _get_block_circles(doc, block_name: str) -> list[tuple[float, float, float]]:
     """
     Return list of (offset_x, offset_y, diameter) for every CIRCLE in the
@@ -128,44 +185,73 @@ def _get_block_circles(doc, block_name: str) -> list[tuple[float, float, float]]
 def _get_block_bbox_size(doc, block_name: str) -> tuple[float, float, float, float] | None:
     """
     For blocks with no CIRCLE (box / rectangular sleeves), estimate the
-    sleeve size from the bounding box of all LINE and LWPOLYLINE endpoints.
+    sleeve size from the outer outline.
+
+    A block qualifies as a rectangular sleeve only if it carries evidence
+    of a closed rectangular frame. Annotation / leader-arrow blocks that
+    contain only an open polyline + a short line are rejected (they would
+    otherwise inflate the bbox into a spurious "huge rect sleeve").
+
+    Accepted evidence:
+      1. At least one CLOSED LWPOLYLINE with ≥3 points → use that as bbox.
+      2. At least 4 LINE entities → use union LINE bbox (supports the
+         "4-sided frame + interior hatching" style).
 
     Returns (cx, cy, width, height) in block-local coordinates, or None if
-    the block has no measurable geometry.
+    the block has no recognisable rectangular outline.
     """
     block = doc.blocks.get(block_name)
     if block is None:
         return None
 
-    xs: list[float] = []
-    ys: list[float] = []
-
+    # Evidence 1: find the largest closed LWPOLYLINE (outer frame)
+    best_frame: tuple[float, float, float, float] | None = None
+    best_area = 0.0
+    line_count = 0
+    line_xs: list[float] = []
+    line_ys: list[float] = []
     for ent in block:
-        if ent.dxftype() == "LINE":
-            xs += [ent.dxf.start.x, ent.dxf.end.x]
-            ys += [ent.dxf.start.y, ent.dxf.end.y]
-        elif ent.dxftype() == "LWPOLYLINE":
-            for pt in ent.get_points():
-                xs.append(float(pt[0]))
-                ys.append(float(pt[1]))
+        t = ent.dxftype()
+        if t == "LWPOLYLINE" and getattr(ent, "is_closed", False):
+            pts = list(ent.get_points())
+            if len(pts) < 3:
+                continue
+            xs = [float(p[0]) for p in pts]
+            ys = [float(p[1]) for p in pts]
+            w = max(xs) - min(xs)
+            h = max(ys) - min(ys)
+            area = w * h
+            if area > best_area:
+                best_area = area
+                cx = (min(xs) + max(xs)) / 2.0
+                cy = (min(ys) + max(ys)) / 2.0
+                best_frame = (cx, cy, w, h)
+        elif t == "LINE":
+            line_count += 1
+            line_xs += [ent.dxf.start.x, ent.dxf.end.x]
+            line_ys += [ent.dxf.start.y, ent.dxf.end.y]
 
-    if not xs:
-        return None
+    if best_frame is not None:
+        return best_frame
 
-    xmin, xmax = min(xs), max(xs)
-    ymin, ymax = min(ys), max(ys)
-    cx = (xmin + xmax) / 2.0
-    cy = (ymin + ymax) / 2.0
-    w = xmax - xmin
-    h = ymax - ymin
-    return (cx, cy, w, h)
+    # Evidence 2: block with ≥4 LINEs → treat union LINE bbox as the frame.
+    # 4 is the minimum needed to bound a rectangle; below that the block is
+    # almost certainly a leader/annotation symbol, not a sleeve outline.
+    if line_count >= 4 and line_xs:
+        xmin, xmax = min(line_xs), max(line_xs)
+        ymin, ymax = min(line_ys), max(line_ys)
+        cx = (xmin + xmax) / 2.0
+        cy = (ymin + ymax) / 2.0
+        return (cx, cy, xmax - xmin, ymax - ymin)
+
+    return None
 
 
 def _extract_sleeves(doc, msp) -> list[Sleeve]:
     """
-    Extract all sleeve INSERT entities from sleeve layers.
+    Extract sleeves from sleeve layers.
 
-    Three block patterns are handled:
+    Three INSERT-block patterns are handled:
 
     1. Named ``スリーブ(S)-Z{uid}`` / ``スリーブ（鉄）-Z{uid}`` with a single
        CIRCLE centred at (0,0): INSERT.insert == sleeve centre, diameter from
@@ -180,6 +266,13 @@ def _extract_sleeves(doc, msp) -> list[Sleeve]:
        having LINE/LWPOLYLINE geometry (box or pipe-through-slab type):
        sleeve centre = INSERT.insert + bbox centre, diameter = minimum of
        bounding-box width and height (the cross-section short axis).
+
+    Two standalone-entity patterns are also captured (for drawings that
+    draw sleeves directly on the sleeve layer without using a block):
+
+    4. Standalone CIRCLE on a sleeve layer → round sleeve.
+    5. Standalone closed LWPOLYLINE on a sleeve layer → rectangular sleeve
+       (diameter = min(width, height); width/height recorded).
     """
     sleeve_layers = _find_layers(doc, "スリーブ")
 
@@ -197,8 +290,16 @@ def _extract_sleeves(doc, msp) -> list[Sleeve]:
             _bbox_cache[bname] = _get_block_bbox_size(doc, bname)
         return _bbox_cache[bname]
 
+    # Pattern 3 reached = INSERT has no CIRCLE inside, only LINE/LWPOLYLINE.
+    # That is the definition of a rectangular sleeve in our drawings — round
+    # sleeves are always represented by a CIRCLE. Aspect ratio is irrelevant:
+    # a perfectly square (1:1) sleeve must still render as a square, not a circle.
+    def _rect_shape_for_block(bname: str, w: float, h: float) -> str:
+        return "rect"
+
     sleeves: list[Sleeve] = []
     uid_counter = 0
+    insert_centers: list[tuple[float, float]] = []  # for dedup vs standalone
 
     for ins in _entities_on_layers(msp, sleeve_layers, "INSERT"):
         block_name: str = ins.dxf.name
@@ -217,14 +318,11 @@ def _extract_sleeves(doc, msp) -> list[Sleeve]:
         cos_r = math.cos(rot_rad)
         sin_r = math.sin(rot_rad)
 
-        # Only process blocks whose name starts with a sleeve/box keyword.
-        # INS-G* composite blocks (slab labels, etc.) are NOT sleeves.
-        _is_sleeve_block = any(
-            kw in block_name for kw in ("スリーブ", "箱", "電気パイプ")
-        )
-        if not _is_sleeve_block:
-            continue
-
+        # Any INSERT on a sleeve layer is a sleeve candidate. Block-name
+        # based filtering was removed because it excluded legitimate rect
+        # sleeves using naming conventions like ``INS-G{uid}``
+        # (vertical pipe-through-slab blocks).
+        ins_color = _resolve_entity_color(doc, ins)
         circles = get_circles(block_name)
 
         if circles:
@@ -247,8 +345,13 @@ def _extract_sleeves(doc, msp) -> list[Sleeve]:
                         diameter=diameter,
                         layer=layer,
                         discipline=discipline,
+                        shape="round",
+                        width=diameter,
+                        height=diameter,
+                        color=ins_color,
                     )
                 )
+                insert_centers.append((wx, wy))
         else:
             # --- Pattern 3: Rectangular / box sleeves (no CIRCLE) ---
             # Use the INSERT point itself as the sleeve centre (block local
@@ -273,6 +376,11 @@ def _extract_sleeves(doc, msp) -> list[Sleeve]:
             if not _in_building_range(wx, wy):
                 continue
 
+            # Rotated world-space width/height (only swap on 90°/270°)
+            is_side_swapped = abs(math.sin(rot_rad)) > abs(math.cos(rot_rad))
+            world_w = abs(bh * scale_y) if is_side_swapped else abs(bw * scale_x)
+            world_h = abs(bw * scale_x) if is_side_swapped else abs(bh * scale_y)
+
             uid_counter += 1
             sleeves.append(
                 Sleeve(
@@ -281,10 +389,98 @@ def _extract_sleeves(doc, msp) -> list[Sleeve]:
                     diameter=diameter,
                     layer=layer,
                     discipline=discipline,
+                    shape=_rect_shape_for_block(block_name, bw, bh),
+                    width=world_w,
+                    height=world_h,
+                    color=ins_color,
                 )
             )
+            insert_centers.append((wx, wy))
+
+    # -----------------------------------------------------------------
+    # Pattern 4: standalone CIRCLE on a sleeve layer.
+    # -----------------------------------------------------------------
+    for ent in _entities_on_layers(msp, sleeve_layers, "CIRCLE"):
+        cx = ent.dxf.center.x
+        cy = ent.dxf.center.y
+        if not _in_building_range(cx, cy):
+            continue
+        if _near_any(cx, cy, insert_centers):
+            continue  # already captured via an INSERT
+
+        diameter = ent.dxf.radius * 2.0
+        if diameter <= 0:
+            continue
+
+        layer = ent.dxf.layer
+        uid_counter += 1
+        sleeves.append(
+            Sleeve(
+                id=f"standalone_circle_{uid_counter}",
+                center=(cx, cy),
+                diameter=diameter,
+                layer=layer,
+                discipline=_discipline_from_layer(layer),
+                shape="round",
+                width=diameter,
+                height=diameter,
+                color=_resolve_entity_color(doc, ent),
+            )
+        )
+
+    # -----------------------------------------------------------------
+    # Pattern 5: standalone closed LWPOLYLINE on a sleeve layer (rect).
+    # -----------------------------------------------------------------
+    for ent in _entities_on_layers(msp, sleeve_layers, "LWPOLYLINE"):
+        if not getattr(ent, "is_closed", False):
+            continue
+        pts = list(ent.get_points())
+        if len(pts) < 3:
+            continue
+        xs = [float(p[0]) for p in pts]
+        ys = [float(p[1]) for p in pts]
+        xmin, xmax = min(xs), max(xs)
+        ymin, ymax = min(ys), max(ys)
+        cx = (xmin + xmax) / 2.0
+        cy = (ymin + ymax) / 2.0
+        if not _in_building_range(cx, cy):
+            continue
+        if _near_any(cx, cy, insert_centers):
+            continue  # already captured via an INSERT
+
+        w = xmax - xmin
+        h = ymax - ymin
+        if w <= 0 or h <= 0:
+            continue
+
+        diameter = min(w, h)
+        layer = ent.dxf.layer
+        uid_counter += 1
+        sleeves.append(
+            Sleeve(
+                id=f"standalone_rect_{uid_counter}",
+                center=(cx, cy),
+                diameter=diameter,
+                layer=layer,
+                discipline=_discipline_from_layer(layer),
+                shape="rect",
+                width=w,
+                height=h,
+                color=_resolve_entity_color(doc, ent),
+            )
+        )
 
     return sleeves
+
+
+def _near_any(
+    x: float, y: float, points: list[tuple[float, float]], tol: float = 50.0
+) -> bool:
+    """True if (x, y) is within *tol* mm of any point in *points*."""
+    for px, py in points:
+        if abs(px - x) <= tol and abs(py - y) <= tol:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -295,16 +491,11 @@ def _extract_grid_lines(doc, msp) -> list[GridLine]:
     """
     Extract grid (通り芯) LINEs.
 
-    Grid layers have suffixes ``C131_通心`` or ``C131_通芯``.
-    A line is classified as:
-    - Horizontal (H) when |dy| < |dx|  → position = average Y of endpoints
-    - Vertical   (V) when |dx| < |dy|  → position = average X of endpoints
-
-    Only lines whose midpoint falls in the building range are kept.
-    Near-duplicate positions (within 50 mm) are deduplicated, keeping one
-    representative per unique grid position.
+    Matches any layer whose name contains 通心 / 通芯 / 通り心 / 通り芯,
+    covering Takenaka-standard ``C131_通心`` / ``C131_通芯``, free-form
+    ``[建築]通り芯`` / ``[建築]...通り心`` variants, and older 通り心 spellings.
     """
-    grid_layers = _find_layers_any(doc, ["C131_通心", "C131_通芯"])
+    grid_layers = _find_layers_any(doc, ["通心", "通芯", "通り心", "通り芯"])
 
     _H_DEDUP = 50.0
     _V_DEDUP = 50.0
@@ -377,6 +568,7 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
     """
     wall_keywords = [
         "C151_壁心",
+        "C151_壁芯",
         "F105_RC壁",
         "F106_RC壁",
         "A421_壁",
@@ -388,6 +580,14 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
         "A521_壁",
         "A561_耐火被覆",
         "★既存躯体外壁",
+        # Fallback — catch non-standard naming: [建築]壁, [建築]A401_壁 etc.
+        "_壁",
+        "_外壁",
+        "_RC壁",
+        "]壁",    # bracketed discipline prefix: [建築]壁
+        "]外壁",
+        "既存壁",
+        "耐火被覆",
     ]
     wall_layers = _find_layers_any(doc, wall_keywords)
 
@@ -473,6 +673,10 @@ def _extract_step_lines(doc, msp) -> list[StepLine]:
     step_keywords = [
         "F108_3_RCスラブ段差線",
         "F108_5_床ヌスミ",
+        # Fallback — catch non-standard naming
+        "段差線",
+        "床ヌスミ",
+        "スラブ段差",
     ]
     step_layers = _find_layers_any(doc, step_keywords)
 
@@ -516,6 +720,11 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
         "F201_Ｓ柱", "F201_S柱",
         "A412_柱",
         "A521_壁：仕上", "A521_壁:仕上",
+        # Fallback — catch non-standard naming
+        "_柱",
+        "_RC柱",
+        "_S柱", "_Ｓ柱",
+        "]柱",  # bracketed discipline prefix: [建築]柱
     ]
     col_layers = _find_layers_any(doc, col_keywords)
 
@@ -1571,6 +1780,8 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     step_lines = _extract_step_lines(doc, msp)
 
     _attach_label_texts(sleeves, doc, msp, step_lines=step_lines)
+    for s in sleeves:
+        s.sleeve_type = _classify_sleeve_type(s.label_text)
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
     pn_labels = _extract_pn_labels(doc, msp)

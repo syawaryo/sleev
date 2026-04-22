@@ -13,6 +13,11 @@ class Sleeve:
     pn_number: str | None = None
     layer: str = ""
     discipline: str = ""
+    shape: str = "round"       # "round" or "rect"
+    width: float = 0.0         # rect: full width (mm); round: equals diameter
+    height: float = 0.0        # rect: full height (mm); round: equals diameter
+    color: int | None = None   # ACI color index (1 = red). None = unknown / BYLAYER.
+    sleeve_type: str = ""      # "duct" / "pipe" / "cable" / "" (from equipment code)
 
 
 @dataclass

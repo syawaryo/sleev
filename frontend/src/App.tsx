@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import type { FloorData, Sleeve, CheckResult } from "./types";
-import { getFloors, parseFloor, runChecks, uploadDxf, uploadIfc } from "./api";
+import { getFloors, parseFloor, runChecks, uploadDxf, uploadDwg, uploadIfc } from "./api";
 import DrawingView from "./components/DrawingView";
 import SleeveInfo from "./components/SleeveInfo";
 import ListView from "./components/ListView";
@@ -11,7 +11,7 @@ type ColorMode = "severity" | "fl" | "discipline";
 interface FloorEntry {
   id: string;
   label: string;
-  source: "dxf" | "ifc";
+  source: "dxf" | "ifc" | "dwg";
   data: FloorData | null;
   results: CheckResult[];
 }
@@ -32,9 +32,12 @@ function App() {
     grid: true, wall: true, step: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dwgInputRef = useRef<HTMLInputElement>(null);
   const [ifcModalOpen, setIfcModalOpen] = useState(false);
   const [ifcSleeveFile, setIfcSleeveFile] = useState<File | null>(null);
   const [ifcStructureFile, setIfcStructureFile] = useState<File | null>(null);
+  const [dwgConverting, setDwgConverting] = useState(false);
+  const [dwgError, setDwgError] = useState<string | null>(null);
 
   const toggleLayer = (key: keyof typeof layers) =>
     setLayers((p) => ({ ...p, [key]: !p[key] }));
@@ -84,6 +87,35 @@ function App() {
     }
     setLoading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleUploadDwg = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setDwgError(null);
+    setDwgConverting(true);
+    setLoading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const res = await uploadDwg(file, "");
+        setFloors((prev) => {
+          const entry: FloorEntry = { id: res.id, label: res.name, source: "dwg", data: null, results: [] };
+          const exists = prev.findIndex((f) => f.id === res.id);
+          if (exists >= 0) {
+            const next = [...prev];
+            next[exists] = entry;
+            return next;
+          }
+          return [...prev, entry];
+        });
+      }
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail ?? e?.message ?? "DWG変換に失敗しました";
+      setDwgError(String(detail));
+      console.error(e);
+    }
+    setDwgConverting(false);
+    setLoading(false);
+    if (dwgInputRef.current) dwgInputRef.current.value = "";
   };
 
   const handleIfcSubmit = async () => {
@@ -212,9 +244,11 @@ function App() {
         )}
       </div>
 
-      {/* Hidden file input (always rendered) */}
+      {/* Hidden file inputs (always rendered) */}
       <input ref={fileInputRef} type="file" accept=".dxf" multiple style={{ display: "none" }}
         onChange={(e) => handleUpload(e.target.files)} />
+      <input ref={dwgInputRef} type="file" accept=".dwg" multiple style={{ display: "none" }}
+        onChange={(e) => handleUploadDwg(e.target.files)} />
 
       {/* Row 2: Floor tabs + controls */}
       <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "6px 20px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -236,8 +270,8 @@ function App() {
                   {f.label}
                   <span style={{
                     fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 3,
-                    background: f.source === "ifc" ? "#dbeafe" : "#f3f4f6",
-                    color: f.source === "ifc" ? "#1e40af" : "#6b7280",
+                    background: f.source === "ifc" ? "#dbeafe" : f.source === "dwg" ? "#fef3c7" : "#f3f4f6",
+                    color: f.source === "ifc" ? "#1e40af" : f.source === "dwg" ? "#92400e" : "#6b7280",
                     letterSpacing: 0.3,
                   }}>{f.source.toUpperCase()}</span>
                 </button>
@@ -254,6 +288,10 @@ function App() {
         <button onClick={() => fileInputRef.current?.click()} disabled={loading}
           style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
           + DXF追加
+        </button>
+        <button onClick={() => dwgInputRef.current?.click()} disabled={loading}
+          style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
+          {dwgConverting ? "DWG変換中..." : "+ DWG追加"}
         </button>
         <button onClick={() => setIfcModalOpen(true)} disabled={loading}
           style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
@@ -345,6 +383,26 @@ function App() {
           </>
         )}
       </div>
+
+      {/* DWG conversion error toast */}
+      {dwgError && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 120, maxWidth: 420,
+          background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8,
+          padding: "12px 16px", boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+        }}>
+          <div style={{ display: "flex", alignItems: "start", gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", marginBottom: 4 }}>
+                DWG変換エラー
+              </div>
+              <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.5 }}>{dwgError}</div>
+            </div>
+            <button onClick={() => setDwgError(null)}
+              style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>x</button>
+          </div>
+        </div>
+      )}
 
       {/* IFC upload modal */}
       {ifcModalOpen && (

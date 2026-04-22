@@ -143,3 +143,36 @@ def test_parse_1f_wall_lines(floor_data_1f):
     n = len(floor_data_1f.wall_lines)
     print(f"\n  1F wall lines: {n}")
     assert n > 0, "No wall lines extracted from 1F"
+
+
+# ---------------------------------------------------------------------------
+# Shape / color classification (customer-visibility regression guard)
+# ---------------------------------------------------------------------------
+
+def test_parse_1f_sleeve_shapes(floor_data_1f):
+    """Both round and rect sleeves should be classified on 1F."""
+    rounds = [s for s in floor_data_1f.sleeves if s.shape == "round"]
+    rects = [s for s in floor_data_1f.sleeves if s.shape == "rect"]
+    print(f"\n  1F round={len(rounds)}, rect={len(rects)}")
+    assert len(rounds) > 0, "No round sleeves classified"
+    assert len(rects) > 0, "No rect sleeves classified (角スリーブ脱落の疑い)"
+
+
+def test_parse_1f_sleeve_dimensions(floor_data_1f):
+    """Every sleeve must have non-zero width and height."""
+    bad = [
+        s for s in floor_data_1f.sleeves
+        if s.width <= 0 or s.height <= 0
+    ]
+    assert not bad, f"{len(bad)} sleeves have zero width/height"
+
+
+def test_standalone_sleeves_captured(floor_data_1f):
+    """Standalone (non-INSERT) sleeves should be captured if present in drawing.
+
+    The 1F sample drawing includes at least one standalone red rect sleeve.
+    """
+    standalone = [s for s in floor_data_1f.sleeves if s.id.startswith("standalone_")]
+    print(f"\n  1F standalone sleeves: {len(standalone)}")
+    # Assertion is a lower bound — we expect at least the known red rect.
+    assert len(standalone) >= 1, "No standalone sleeves extracted from 1F"

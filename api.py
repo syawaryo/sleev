@@ -26,6 +26,7 @@ from sleeve_checker.models import (
 )
 from sleeve_checker.parser import parse_dxf
 from sleeve_checker.ifc_parser import parse_ifc
+from sleeve_checker.dwg_to_dxf import convert_dwg_to_dxf, DwgConversionError
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -155,6 +156,11 @@ def _dict_to_floor_data(d: dict) -> FloorData:
             fl_text=s.get("fl_text"),
             pn_number=s.get("pn_number"), layer=s.get("layer", ""),
             discipline=s.get("discipline", ""),
+            shape=s.get("shape", "round"),
+            width=s.get("width", s["diameter"]),
+            height=s.get("height", s["diameter"]),
+            color=s.get("color"),
+            sleeve_type=s.get("sleeve_type", ""),
         ) for s in d.get("sleeves", [])],
         grid_lines=[GridLine(
             axis_label=g["axis_label"], direction=g["direction"], position=g["position"],
@@ -360,6 +366,48 @@ async def upload_dxf(file: UploadFile = File(...), label: str = Form("")):
         "name": stem,
         "label": label or stem,
         "path": str(dest).replace("\\", "/"),
+    }
+
+
+@app.post("/api/upload_dwg")
+async def upload_dwg(file: UploadFile = File(...), label: str = Form("")):
+    """Upload a DWG, convert to DXF via ODA File Converter, register as a floor."""
+    import tempfile
+
+    if not file.filename or not file.filename.lower().endswith(".dwg"):
+        raise HTTPException(status_code=400, detail="DWG file required")
+
+    DXF_DIR.mkdir(exist_ok=True)
+    stem = Path(file.filename).stem
+
+    with tempfile.NamedTemporaryFile(suffix=".dwg", delete=False) as tmp:
+        tmp.write(await file.read())
+        dwg_tmp = Path(tmp.name)
+
+    try:
+        dxf_path = convert_dwg_to_dxf(dwg_tmp, DXF_DIR)
+    except DwgConversionError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"DWG→DXF conversion failed: {e} — "
+                "try converting locally with ODA File Converter and upload the DXF."
+            ),
+        )
+    finally:
+        dwg_tmp.unlink(missing_ok=True)
+
+    floor_id = _FLOOR_ID_MAP.get(stem) or _stem_to_floor_id(stem)
+    _FLOOR_ID_MAP[stem] = floor_id
+    _ID_TO_STEM[floor_id] = stem
+    _parse_cache.pop(str(dxf_path.resolve()), None)
+
+    return {
+        "id": floor_id,
+        "name": stem,
+        "label": label or stem,
+        "path": str(dxf_path).replace("\\", "/"),
+        "source": "dwg",
     }
 
 

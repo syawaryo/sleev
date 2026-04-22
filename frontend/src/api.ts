@@ -16,6 +16,19 @@ export async function uploadDxf(file: File, label: string): Promise<{id: string;
   return res.data;
 }
 
+export async function uploadDwg(
+  file: File,
+  label: string,
+): Promise<{id: string; name: string; label: string; path: string; source: string}> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("label", label);
+  const res = await axios.post(`${BASE}/upload_dwg`, form, {
+    timeout: 300_000,  // 5 min — DWG conversion can be slow
+  });
+  return res.data;
+}
+
 export async function uploadIfc(
   sleeveIfc: File,
   structureIfc: File | null,

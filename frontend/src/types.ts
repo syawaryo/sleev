@@ -7,6 +7,11 @@ export interface Sleeve {
   pn_number: string | null;
   layer: string;
   discipline: string;
+  shape?: "round" | "rect";
+  width?: number;
+  height?: number;
+  color?: number | null;  // ACI color index (1 = red)
+  sleeve_type?: "duct" | "pipe" | "cable" | "";
 }
 
 export interface GridLine {

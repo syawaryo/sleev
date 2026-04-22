@@ -53,37 +53,45 @@ def _discipline_from_layer(layer: str | None) -> str:
     return ""
 
 
-def _profile_diameter(solid) -> float | None:
-    """Pull a representative diameter from an IfcExtrudedAreaSolid."""
+def _profile_geometry(solid) -> tuple[str, float, float] | None:
+    """Return (shape, width, height) from an IfcExtrudedAreaSolid profile.
+
+    - IfcCircleProfileDef → ("round", d, d) where d = 2 * Radius
+    - IfcRectangleProfileDef → ("rect", XDim, YDim)
+    """
     if not solid.is_a("IfcExtrudedAreaSolid"):
         return None
     prof = solid.SweptArea
     if prof.is_a("IfcCircleProfileDef"):
-        return float(prof.Radius) * 2.0
+        d = float(prof.Radius) * 2.0
+        return ("round", d, d)
     if prof.is_a("IfcRectangleProfileDef"):
-        # treat rectangle as equivalent-diameter = (X+Y)/2
-        return (float(prof.XDim) + float(prof.YDim)) / 2.0
+        return ("rect", float(prof.XDim), float(prof.YDim))
     return None
 
 
-def _sleeve_diameter(proxy) -> float:
-    """Resolve diameter from representation (handles IfcMappedItem indirection)."""
+def _sleeve_geometry(proxy) -> tuple[str, float, float]:
+    """Resolve (shape, width, height) from representation.
+
+    Handles IfcMappedItem indirection. Returns ("round", 0, 0) if nothing
+    resolvable — caller treats that as "no geometry available".
+    """
     rep = proxy.Representation
     if rep is None:
-        return 0.0
+        return ("round", 0.0, 0.0)
     for r in rep.Representations:
         for item in r.Items:
             if item.is_a("IfcMappedItem"):
                 mapped = item.MappingSource.MappedRepresentation
                 for inner in mapped.Items:
-                    d = _profile_diameter(inner)
-                    if d is not None:
-                        return d
+                    g = _profile_geometry(inner)
+                    if g is not None:
+                        return g
             else:
-                d = _profile_diameter(item)
-                if d is not None:
-                    return d
-    return 0.0
+                g = _profile_geometry(item)
+                if g is not None:
+                    return g
+    return ("round", 0.0, 0.0)
 
 
 def _extract_sleeves(f) -> list[Sleeve]:
@@ -108,7 +116,9 @@ def _extract_sleeves(f) -> list[Sleeve]:
         plumb = psets.get("Pset_Tfas_SystemProperty_HVAC_Plumbing_Parts", {})
         circ = psets.get("Pset_BE-Bridge_SleeveCircular", {})
 
-        diameter = _sleeve_diameter(p)
+        shape, width, height = _sleeve_geometry(p)
+        # For round: diameter = width (== height). For rect: short cross-section.
+        diameter = min(width, height) if shape == "rect" else width
 
         # Synthesise the "nominal + outer" diameter_text format that check #3
         # expects. IFC geometry gives us the outer diameter directly; the Tfas
@@ -127,6 +137,10 @@ def _extract_sleeves(f) -> list[Sleeve]:
         layer = basic.get("layer") or ""
         discipline = _discipline_from_layer(layer)
 
+        # Late import keeps this module independent of parser.py until called.
+        from .parser import _classify_sleeve_type
+        sleeve_type = _classify_sleeve_type(label_text)
+
         sleeves.append(Sleeve(
             id=p.GlobalId,
             center=(x, y),
@@ -137,6 +151,11 @@ def _extract_sleeves(f) -> list[Sleeve]:
             pn_number=None,  # not present in Tfas IFC; Phase 3 will synthesise
             layer=layer,
             discipline=discipline,
+            shape=shape,
+            width=width,
+            height=height,
+            color=None,  # IFC doesn't carry ACI color
+            sleeve_type=sleeve_type,
         ))
     return sleeves
 

@@ -377,30 +377,45 @@ export default function DrawingView({
           </g>
         ))}
 
-        {/* Sleeves */}
+        {/* Sleeves — render round as <circle>, rect (角スリーブ) as <rect> */}
         {layers.sleeve && floorData.sleeves.map((s) => {
           const colors = getSleeveColors(s);
           const isSelected = s.id === selectedSleeveId;
-          const r = Math.max(s.diameter / 2, 200);
+          const isRect = s.shape === "rect";
+          // Minimum on-screen size so tiny sleeves remain clickable.
+          const halfW = Math.max((s.width ?? s.diameter) / 2, 200);
+          const halfH = Math.max((s.height ?? s.diameter) / 2, 200);
+          const r = Math.max(s.diameter / 2, 200);  // for round + highlight rings
+          const cx = s.center[0];
+          const cy = s.center[1];
           return (
             <g key={s.id} style={{ cursor: "pointer" }}
               onMouseEnter={(e) => { e.stopPropagation(); onSleeveHover(s); }}
               onClick={(e) => { e.stopPropagation(); onSleeveClick(s); }}>
-              <circle cx={s.center[0]} cy={s.center[1]} r={r * 1.8} fill="transparent" stroke="none" />
+              <circle cx={cx} cy={cy} r={Math.max(halfW, halfH) * 1.8} fill="transparent" stroke="none" />
               {isSelected && (
                 <>
-                  <circle cx={s.center[0]} cy={s.center[1]} r={r + 200}
+                  <circle cx={cx} cy={cy} r={r + 200}
                     fill="none" stroke="#ef4444" strokeWidth={25} opacity={0.8}>
                     <animate attributeName="r" from={r + 100} to={r + 400} dur="1s" repeatCount="indefinite" />
                     <animate attributeName="opacity" from="0.8" to="0" dur="1s" repeatCount="indefinite" />
                   </circle>
-                  <circle cx={s.center[0]} cy={s.center[1]} r={r + 80}
+                  <circle cx={cx} cy={cy} r={r + 80}
                     fill="none" stroke="#ef4444" strokeWidth={20} strokeDasharray="60,30" opacity={0.7} />
                 </>
               )}
-              <circle cx={s.center[0]} cy={s.center[1]} r={r}
-                fill={colors.fill} stroke={colors.stroke} strokeWidth={isSelected ? 35 : 20} />
-              <circle cx={s.center[0]} cy={s.center[1]} r={35} fill={colors.stroke} />
+              {isRect ? (
+                <rect
+                  x={cx - halfW} y={cy - halfH}
+                  width={halfW * 2} height={halfH * 2}
+                  fill={colors.fill} stroke={colors.stroke}
+                  strokeWidth={isSelected ? 35 : 20}
+                />
+              ) : (
+                <circle cx={cx} cy={cy} r={r}
+                  fill={colors.fill} stroke={colors.stroke} strokeWidth={isSelected ? 35 : 20} />
+              )}
+              <circle cx={cx} cy={cy} r={35} fill={colors.stroke} />
             </g>
           );
         })}
