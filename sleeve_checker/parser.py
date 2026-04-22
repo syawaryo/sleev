@@ -158,7 +158,9 @@ def _refine_sleeve_shape_from_label(sleeve: Sleeve) -> None:
 # Real horizontal pipe/duct penetrations in plan view are very elongated
 # (long thin slot showing pipe length through a wall). Square-ish rects
 # are typically vertical square ducts.
-_ASPECT_HORIZONTAL_MIN = 3.0   # ≥3:1 → confident horizontal
+_ASPECT_HORIZONTAL_MIN = 2.0   # ≥2:1 → confident horizontal (lowered from 3.0
+                                #         to catch wall/beam penetrations that
+                                #         are drawn at 2–3:1 aspect)
 _ASPECT_VERTICAL_MAX = 1.3     # ≤1.3:1 (near-square) → confident vertical
 
 
@@ -166,18 +168,35 @@ def _infer_sleeve_orientation(sleeve: Sleeve) -> str:
     """Heuristic vertical/horizontal classifier for DXF sleeves.
 
     DXF plan view doesn't encode the pipe axis directly, so we infer from
-    the 2D footprint:
+    the 2D footprint + annotation text:
 
-    - Round section      → vertical pipe seen from above.
-    - Highly elongated   → horizontal pipe slot through a wall.
-    - Near-square rect   → vertical square duct punch-through.
-    - Everything else    → "" (unknown; second pass may recover via
-                                pair-detection on the full sleeve list).
+    - Round section                    → vertical pipe seen from above.
+    - Rect on 衛生 layer               → horizontal (plumbing is always
+                                         round; a rect footprint means the
+                                         pipe runs sideways through a wall).
+    - Label contains 外径 / 梁孔        → horizontal (drafter explicitly
+                                         marked it as a wall/beam penetration).
+    - Highly elongated (≥2:1)          → horizontal pipe slot through a wall.
+    - Near-square rect (≤1.3:1)        → vertical square duct punch-through.
+    - Everything else                  → "" (unknown; second pass may
+                                         recover via pair-detection).
     """
     if sleeve.orientation:
         return sleeve.orientation  # respect earlier resolution (label override)
     if sleeve.shape == "round":
         return "vertical"
+
+    # Plumbing (衛生) pipes are almost always round cross-section. A rect
+    # footprint on 衛生 → the pipe is drawn sideways, i.e. horizontal.
+    if sleeve.discipline == "衛生":
+        return "horizontal"
+
+    # Explicit annotation signals: 外径 or 梁孔 → the drafter is describing
+    # a round pipe passing through the wall/beam sideways.
+    combined = (sleeve.label_text or "") + " " + (sleeve.diameter_text or "")
+    if "外径" in combined or "梁孔" in combined:
+        return "horizontal"
+
     w = sleeve.width or sleeve.diameter
     h = sleeve.height or sleeve.diameter
     long_side = max(w, h)
@@ -1412,9 +1431,18 @@ def _attach_label_texts(sleeves: list[Sleeve], doc, msp, step_lines: list[StepLi
             sleeve.label_text = best_phi_txt
 
         # diameter_text: combine all nearby φ/外径 texts (they may be split
-        # across multiple TEXT entities, e.g. "V 175φ" + "(外径180φ)100A")
+        # across multiple TEXT entities, e.g. "V 175φ" + "(外径180φ)100A").
+        # Dedupe by text content to avoid emitting "φ124 φ124 φ124 φ124 φ124"
+        # when the drafter copied the same callout multiple times.
         if phi_hits:
-            sleeve.diameter_text = " ".join(txt for _, txt in phi_hits)
+            seen: set[str] = set()
+            uniq: list[str] = []
+            for _, t in phi_hits:
+                key = t.strip()
+                if key and key not in seen:
+                    seen.add(key)
+                    uniq.append(t)
+            sleeve.diameter_text = " ".join(uniq)
 
         if best_fl_txt is not None:
             # Found FL on the sleeve's own layer — use as-is
@@ -1859,10 +1887,14 @@ def _attach_pn_numbers(sleeves: list[Sleeve], pn_labels: list[PnLabel],
         across multiple TEXT entities).
         """
         phi_texts: list[str] = []
+        seen_phi: set[str] = set()
         best_fl: str | None = None
         for _d, txt in pn_nearby_texts.get(pn_text, []):
             if _RE_PHI.search(txt) and not re.match(r"P-N-", txt):
-                phi_texts.append(txt)
+                key = txt.strip()
+                if key and key not in seen_phi:
+                    seen_phi.add(key)
+                    phi_texts.append(txt)
             if best_fl is None and _RE_FL.search(txt):
                 best_fl = txt
         if phi_texts:
