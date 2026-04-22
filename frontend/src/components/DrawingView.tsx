@@ -215,8 +215,8 @@ export default function DrawingView({
       onDoubleClick={handleDoubleClick}
     >
       <g transform="scale(1,-1)">
-        {/* Grid lines — extend 8% beyond data bounds so axes run past edge sleeves */}
-        {layers.grid && floorData.grid_lines.map((g, i) => {
+        {/* Grid lines + axis-label bubbles at both ends of each axis */}
+        {layers.grid && floorData.grid_lines.flatMap((g, i) => {
           const b = dataBounds;
           const padX = b ? (b.maxX - b.minX) * 0.08 + 2000 : 5000;
           const padY = b ? (b.maxY - b.minY) * 0.08 + 2000 : 5000;
@@ -224,15 +224,28 @@ export default function DrawingView({
           const x2 = b ? b.maxX + padX : 85000;
           const y1 = b ? b.minY - padY : -5000;
           const y2 = b ? b.maxY + padY : 40000;
-          return g.direction === "H" ? (
+          const bubbleR = 900;
+          const endpoints: [number, number][] = g.direction === "H"
+            ? [[x1 - bubbleR, g.position], [x2 + bubbleR, g.position]]
+            : [[g.position, y1 - bubbleR], [g.position, y2 + bubbleR]];
+          const line = g.direction === "H" ? (
             <line key={`gh${i}`} x1={x1} y1={g.position} x2={x2} y2={g.position}
               stroke="#9ca3af" strokeWidth={15} strokeDasharray="300,150" />
           ) : (
             <line key={`gv${i}`} x1={g.position} y1={y1} x2={g.position} y2={y2}
               stroke="#9ca3af" strokeWidth={15} strokeDasharray="300,150" />
           );
-        }
-        )}
+          const bubbles = endpoints.map(([lx, ly], pi) => (
+            <g key={`gl${i}-${pi}`} transform={`translate(${lx} ${ly})`}>
+              <circle cx={0} cy={0} r={bubbleR} fill="#fff" stroke="#6b7280" strokeWidth={25} />
+              <text x={0} y={0} textAnchor="middle" dominantBaseline="central"
+                    fontSize={bubbleR * 1.2} fill="#374151" fontWeight={700}
+                    fontFamily="'Inter','Noto Sans JP',sans-serif"
+                    transform="scale(1,-1)">{g.axis_label}</text>
+            </g>
+          ));
+          return [line, ...bubbles];
+        })}
 
         {/* Lower floor walls */}
         {layers.lowerWall && lowerFloorData?.wall_lines.map((w, i) => (
