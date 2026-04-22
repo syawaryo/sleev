@@ -324,6 +324,33 @@ def _discipline_from_layer(layer_name: str) -> str:
 _BLDG_TOLERANCE = 10.0  # mm tolerance for floating-point at boundaries
 
 
+# Detail-drawing fragments (legend panels, section cuts, title blocks,
+# enlarged details) often sit on the same architectural layers as the real
+# plan. A 2 m tolerance past the BLDG_X/Y bounds keeps real outer walls /
+# columns / slab outlines (which extend < 2 m past grids for thickness)
+# while rejecting detail clusters that sit 6 m+ outside the footprint.
+_PLAN_RANGE_TOL = 2000.0
+
+
+def _point_in_building_bbox(x: float, y: float) -> bool:
+    return (
+        BLDG_X_MIN - _PLAN_RANGE_TOL <= x <= BLDG_X_MAX + _PLAN_RANGE_TOL
+        and BLDG_Y_MIN - _PLAN_RANGE_TOL <= y <= BLDG_Y_MAX + _PLAN_RANGE_TOL
+    )
+
+
+def _segment_in_building_bbox(
+    sx: float, sy: float, ex: float, ey: float,
+) -> bool:
+    """True iff both endpoints sit inside the building bbox + tolerance.
+
+    Midpoint-only checks let long margin-to-plan segments slip through; using
+    both endpoints is strict enough to reject the ~60 m outliers seen on
+    Takenaka sample sheets while keeping legitimate 外壁 geometry.
+    """
+    return _point_in_building_bbox(sx, sy) and _point_in_building_bbox(ex, ey)
+
+
 def _in_building_range(x: float, y: float) -> bool:
     """Loose building-extent check used by the sleeve paths.
 
@@ -858,25 +885,8 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
 
     wall_lines: list[WallLine] = []
 
-    # Detail-drawing walls (legend panels, section cuts, title blocks) land
-    # on the same *_壁心 / *_RC壁 layers but live in the sheet margins. A
-    # 2 m tolerance past the BLDG_X/Y bounds keeps real outer walls
-    # (thickness + finishes rarely exceed 2 m past grids) while rejecting
-    # detail panels that sit 6 m+ outside the footprint.
-    _WALL_RANGE_TOL = 2000.0
-
     def _wall_in_building(sx: float, sy: float, ex: float, ey: float) -> bool:
-        # Accept only if the entire segment (both endpoints) is within the
-        # tolerant bbox. Midpoint alone let long margin-to-plan walls slip
-        # through whenever their midpoint happened to land inside.
-        lo_x = BLDG_X_MIN - _WALL_RANGE_TOL
-        hi_x = BLDG_X_MAX + _WALL_RANGE_TOL
-        lo_y = BLDG_Y_MIN - _WALL_RANGE_TOL
-        hi_y = BLDG_Y_MAX + _WALL_RANGE_TOL
-        return (
-            lo_x <= sx <= hi_x and lo_x <= ex <= hi_x
-            and lo_y <= sy <= hi_y and lo_y <= ey <= hi_y
-        )
+        return _segment_in_building_bbox(sx, sy, ex, ey)
 
     for entity in msp:
         layer = entity.dxf.layer
@@ -968,7 +978,11 @@ def _extract_step_lines(doc, msp) -> list[StepLine]:
                         StepLine(start=(sx, sy), end=(ex, ey), layer=layer)
                     )
 
-    return step_lines
+    # Drop detail-drawing step fragments in sheet margins.
+    return [
+        s for s in step_lines
+        if _segment_in_building_bbox(s.start[0], s.start[1], s.end[0], s.end[1])
+    ]
 
 
 def _extract_recess_polygons(doc, msp):
@@ -1077,7 +1091,11 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
                 )
                 prev_x, prev_y = nx, ny
 
-    return col_lines
+    # Drop detail-drawing columns that land in the sheet margins.
+    return [
+        c for c in col_lines
+        if _segment_in_building_bbox(c.start[0], c.start[1], c.end[0], c.end[1])
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1166,6 +1184,15 @@ def _extract_dim_lines(doc, msp) -> list[DimLine]:
         except Exception:
             # Skip malformed DIMENSION entities
             continue
+
+    # Drop dim lines whose reference points are outside the building bbox
+    # (legend / title-block dimensions on the same layer).
+    dim_lines = [
+        d for d in dim_lines
+        if _point_in_building_bbox(d.defpoint1[0], d.defpoint1[1])
+        and _point_in_building_bbox(d.defpoint2[0], d.defpoint2[1])
+        and _point_in_building_bbox(d.defpoint3[0], d.defpoint3[1])
+    ]
 
     return dim_lines
 
@@ -1853,7 +1880,8 @@ def _extract_slab_labels(doc, msp) -> list[SlabLabel]:
         if slab_no:
             labels.append(SlabLabel(x=x, y=y, slab_no=slab_no, level=level, thickness=thickness))
 
-    return labels
+    # Drop detail-area slab labels (sheet margin).
+    return [l for l in labels if _point_in_building_bbox(l.x, l.y)]
 
 
 # ---------------------------------------------------------------------------
@@ -1896,7 +1924,8 @@ def _extract_step_labels(doc, msp) -> list[SlabZone]:
                 labels.append(SlabZone(x=x, y=y, fl_text=fl_text, fl_value=val))
         except Exception:
             continue
-    return labels
+    # Drop detail-area zone labels (sheet margin).
+    return [l for l in labels if _point_in_building_bbox(l.x, l.y)]
 
 
 # ---------------------------------------------------------------------------
@@ -1918,7 +1947,11 @@ def _extract_slab_outlines(doc, msp) -> list[SlabOutline]:
             ex, ey = entity.dxf.end.x, entity.dxf.end.y
             if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
                 outlines.append(SlabOutline(start=(sx, sy), end=(ex, ey)))
-    return outlines
+    # Drop sheet-margin outlines (detail drawings).
+    return [
+        o for o in outlines
+        if _segment_in_building_bbox(o.start[0], o.start[1], o.end[0], o.end[1])
+    ]
 
 
 # ---------------------------------------------------------------------------
