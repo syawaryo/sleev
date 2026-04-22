@@ -26,6 +26,7 @@ interface Props {
   onColorModeChange: (mode: ColorMode) => void;
   sleeveCounts: Record<DisciplineKey, number>;
   showLowerWallToggle: boolean;
+  lowerFloorLabel?: string;
   onPdfFilesSelected: (files: FileList | null) => void;
   onPdfClear: () => void;
   onPdfOpacityChange: (v: number) => void;
@@ -154,23 +155,19 @@ const StaticLayers = memo(function StaticLayers({
         </g>
       ))}
 
-      {/* Grid lines + axis-label bubbles — drawn as 一点鎖線 (chain-dot),
-          darker than walls so they read as the drawing's skeleton. */}
+      {/* Grid lines + axis-label bubbles — solid thin line, darker than
+          walls so they still read as the drawing's skeleton. */}
       {layers.grid && gridFrame && floorData.grid_lines.flatMap((g, i) => {
         const { x1, x2, y1, y2, bubbleR } = gridFrame;
         const endpoints: [number, number][] = g.direction === "H"
           ? [[x1 - bubbleR, g.position], [x2 + bubbleR, g.position]]
           : [[g.position, y1 - bubbleR], [g.position, y2 + bubbleR]];
-        // 一点鎖線 pattern: long-dash, short gap, dot, short gap.
-        // Values are in SVG user units (mm). Tuned so the pattern shows
-        // cleanly at typical zoom levels.
-        const chainDot = "800 150 30 150";
         const line = g.direction === "H" ? (
           <line key={`gh${i}`} x1={x1} y1={g.position} x2={x2} y2={g.position}
-            stroke="#1f2937" strokeWidth={22} strokeDasharray={chainDot} opacity={0.75} />
+            stroke="#1f2937" strokeWidth={18} opacity={0.75} />
         ) : (
           <line key={`gv${i}`} x1={g.position} y1={y1} x2={g.position} y2={y2}
-            stroke="#1f2937" strokeWidth={22} strokeDasharray={chainDot} opacity={0.75} />
+            stroke="#1f2937" strokeWidth={18} opacity={0.75} />
         );
         const bubbles = endpoints.map(([lx, ly], pi) => (
           <g key={`gl${i}-${pi}`} transform={`translate(${lx} ${ly})`}>
@@ -480,7 +477,7 @@ function DrawingViewInner({
   selectedSleeveId, layers, sleeveFilters, colorMode, navigateTarget, onNavigated, highlightCoords,
   pdfOverlayUrl, pdfOverlayOpacity = 0.4,
   onToggleLayer, onToggleSleeveFilter, onColorModeChange, sleeveCounts,
-  showLowerWallToggle, onPdfFilesSelected, onPdfClear, onPdfOpacityChange,
+  showLowerWallToggle, lowerFloorLabel, onPdfFilesSelected, onPdfClear, onPdfOpacityChange,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
@@ -676,7 +673,7 @@ function DrawingViewInner({
               border: `1px solid ${layers.lowerWall ? "#9ca3af" : "#e5e7eb"}`,
               background: layers.lowerWall ? "#f3f4f6" : "#fff",
               color: layers.lowerWall ? "#374151" : "#d1d5db",
-            }}>1F壁</button>
+            }}>{lowerFloorLabel ? `${lowerFloorLabel}壁` : "下階壁"}</button>
         )}
 
         {layers.sleeve && (

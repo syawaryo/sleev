@@ -38,6 +38,32 @@ interface FloorEntry {
   results: CheckResult[];
 }
 
+// "b1f" → -1, "1f" → 1, "2f" → 2, "3f" → 3, ...
+// The "-ifc" suffix is stripped so DXF and IFC of the same storey share a level.
+function floorLevel(id: string): number | null {
+  const m = id.replace(/-ifc$/, "").match(/^(b)?(\d+)f$/i);
+  if (!m) return null;
+  const n = parseInt(m[2], 10);
+  return m[1] ? -n : n;
+}
+
+function findLowerFloor(floors: FloorEntry[], currentId: string): FloorEntry | null {
+  const level = floorLevel(currentId);
+  if (level === null) return null;
+  const current = floors.find((f) => f.id === currentId);
+  if (!current) return null;
+  const candidates = floors.filter((f) => floorLevel(f.id) === level - 1);
+  if (candidates.length === 0) return null;
+  // Prefer the same source (IFC↔IFC / DXF↔DXF) so mixed sets still pair cleanly.
+  return candidates.find((f) => f.source === current.source) ?? candidates[0];
+}
+
+function floorLevelLabel(id: string): string {
+  const lv = floorLevel(id);
+  if (lv === null) return id;
+  return lv < 0 ? `B${-lv}F` : `${lv}F`;
+}
+
 function App() {
   const [floors, setFloors] = useState<FloorEntry[]>([]);
   const [activeFloorIdx, setActiveFloorIdx] = useState(0);
@@ -87,8 +113,9 @@ function App() {
   const results = activeFloor.results;
   const displaySleeve = hoveredSleeve || selectedSleeve;
 
-  // Find 1F data for wall interference overlay
-  const floor1fData = floors.find((f) => f.id === "1f")?.data ?? null;
+  // Lower floor (level − 1) for wall-interference overlay and inter-floor checks.
+  const lowerFloor = findLowerFloor(floors, activeFloor.id);
+  const lowerFloorData = lowerFloor?.data ?? null;
 
   // Sleeve counts per discipline (for filter badges)
   const sleeveCounts = (() => {
@@ -185,14 +212,13 @@ function App() {
       // Parse all floors
       const parsed = await Promise.all(floors.map((f) => parseFloor(f.id)));
 
-      // Find floor pairs: for each floor, find the one below it for wall check
-      // Simple heuristic: if there's a "1f" floor, use it as lower for "2f"
-      const floor1fId = floors.find((f) => f.id === "1f")?.id ?? null;
-
+      // Pair each floor with the floor one level below (level − 1). Same-source
+      // (IFC↔IFC / DXF↔DXF) pairs win over cross-source; floors with no
+      // lower-level counterpart get checked standalone.
       const checked = await Promise.all(
         floors.map((f) => {
-          const lower = f.id !== "1f" && floor1fId ? floor1fId : undefined;
-          return runChecks(f.id, lower);
+          const lower = findLowerFloor(floors, f.id);
+          return runChecks(f.id, lower?.id);
         })
       );
 
@@ -457,7 +483,7 @@ function App() {
               {floorData ? (
                 <DrawingView
                   floorData={floorData}
-                  lowerFloorData={activeFloor.id === "2f" && layers.lowerWall ? floor1fData : null}
+                  lowerFloorData={layers.lowerWall ? lowerFloorData : null}
                   results={results}
                   onSleeveHover={setHoveredSleeve}
                   onSleeveClick={setSelectedSleeve}
@@ -474,7 +500,8 @@ function App() {
                   onToggleSleeveFilter={(key) => toggleSleeveFilter(key)}
                   onColorModeChange={setColorMode}
                   sleeveCounts={sleeveCounts}
-                  showLowerWallToggle={activeFloor.id === "2f"}
+                  showLowerWallToggle={lowerFloor !== null}
+                  lowerFloorLabel={lowerFloor ? floorLevelLabel(lowerFloor.id) : ""}
                   onPdfFilesSelected={handleUploadPdf}
                   onPdfClear={() => setPdfOverlayUrl(null)}
                   onPdfOpacityChange={setPdfOverlayOpacity}
