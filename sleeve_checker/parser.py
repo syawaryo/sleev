@@ -215,6 +215,63 @@ def _infer_orientation_from_pairs(sleeves: list[Sleeve]) -> None:
                 break
 
 
+def _point_to_segment_distance(
+    px: float, py: float,
+    x1: float, y1: float, x2: float, y2: float,
+) -> float:
+    """Shortest distance from point (px,py) to segment (x1,y1)-(x2,y2)."""
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0 and dy == 0:
+        return math.hypot(px - x1, py - y1)
+    t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+    t = max(0.0, min(1.0, t))
+    fx = x1 + t * dx
+    fy = y1 + t * dy
+    return math.hypot(px - fx, py - fy)
+
+
+def _infer_orientation_from_walls(
+    sleeves: list[Sleeve], wall_lines: list[WallLine],
+) -> None:
+    """Third-pass heuristic: round sleeves sitting *on* a wall line are
+    horizontal (wall penetration) rather than vertical (slab penetration).
+
+    In a floor-plan DXF a horizontal pipe through a wall is often drawn as a
+    single small circle on the wall centreline — indistinguishable from a
+    vertical slab penetration without context. If the sleeve centre is
+    within roughly half-a-wall-thickness of any wall segment, reclassify it
+    as horizontal.
+    """
+    if not wall_lines:
+        return
+    # Tight tolerance (half a typical 150–200 mm wall thickness). Widening to
+    # 400–500 mm to catch thicker outer walls was tested and caused ~12× more
+    # false positives than true positives (interior slab sleeves happen to be
+    # within 0.5 m of some wall). Accept missing the thick-外壁 edge case.
+    _ON_WALL_TOL = 200.0
+    for s in sleeves:
+        # Round sleeves on a wall line are reclassified even if the aspect
+        # pass already tentatively set them to "vertical" — a wall centroid
+        # is a stronger signal than the default-vertical fallback.
+        if s.shape != "round":
+            continue
+        if s.orientation == "horizontal":
+            continue
+        sx, sy = s.center
+        # Quick bbox cull keeps this O(N·M) tolerable on 200+ sleeves.
+        for w in wall_lines:
+            x1, y1 = w.start
+            x2, y2 = w.end
+            if min(x1, x2) - _ON_WALL_TOL > sx: continue
+            if max(x1, x2) + _ON_WALL_TOL < sx: continue
+            if min(y1, y2) - _ON_WALL_TOL > sy: continue
+            if max(y1, y2) + _ON_WALL_TOL < sy: continue
+            if _point_to_segment_distance(sx, sy, x1, y1, x2, y2) <= _ON_WALL_TOL:
+                s.orientation = "horizontal"
+                break
+
+
 # ---------------------------------------------------------------------------
 # Layer-lookup helpers
 # ---------------------------------------------------------------------------
@@ -1952,6 +2009,9 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         s.orientation = _infer_sleeve_orientation(s)
     # Second pass: recover "unknown" sleeves via adjacency / pair detection.
     _infer_orientation_from_pairs(sleeves)
+    # Third pass: round sleeves that land on a wall line are wall penetrations,
+    # not slab penetrations — reclassify them as horizontal.
+    _infer_orientation_from_walls(sleeves, wall_lines)
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
     pn_labels = _extract_pn_labels(doc, msp)
