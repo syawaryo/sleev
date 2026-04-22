@@ -91,12 +91,13 @@ def _profile_and_depth(solid) -> tuple[str, float, float, float] | None:
 def _sleeve_top_view(proxy, main_vecter: str | None) -> tuple[str, float, float]:
     """Resolve the plan-view (top-down) shape of a sleeve.
 
-    - Vertical sleeve (main_vecter Z-dominant): plan view = the cross-section
-      (circle for round pipes, rectangle for box sleeves).
-    - Horizontal sleeve (main_vecter X/Y-dominant): plan view is a rectangle
-      of (cross-section diameter) × (extrusion length), with the long axis
-      aligned to the main_vecter direction — matches how DXF drafters draw a
-      horizontal sleeve on a floor plan.
+    - Vertical sleeve (main_vecter Z-dominant) → plan view = cross-section
+      profile (circle for round pipes, rectangle for box sleeves).
+    - Horizontal sleeve (main_vecter X/Y-dominant) → plan view = rectangle of
+      (cross-section diameter) × (extrusion length), with the long axis
+      aligned to the main_vecter direction. Even for circular pipes, a
+      horizontal penetration reads as a long rectangle on a floor plan
+      because you see the pipe's length, not its cross-section circle.
     """
     rep = proxy.Representation
     if rep is None:
@@ -126,21 +127,19 @@ def _sleeve_top_view(proxy, main_vecter: str | None) -> tuple[str, float, float]
         except (TypeError, ValueError):
             pass
 
-    # Vertical → plan view is the cross-section itself
+    # Vertical → plan view is the cross-section as-is
     if abs(az) > max(abs(ax), abs(ay)):
         return (cs_shape, cs_w, cs_h)
 
-    # Horizontal → rectangular footprint on the floor plan.
-    # Width/height depend on whether the main axis is X or Y in world coords.
-    # For round cross-section: cs_w == cs_h == diameter.
-    # For rectangular cross-section: cs_w, cs_h live in the profile's local
-    # plane (perpendicular to extrusion). We assume XDim ≈ horizontal width.
+    # Horizontal → rectangle of diameter × extrusion length, oriented along
+    # the main axis. cs_w == cs_h for circular cross-sections.
+    diameter = cs_h  # short side of the rectangle = pipe/duct diameter
     if abs(ax) > abs(ay):
-        # Along X → rect spans depth (X) × diameter (Y)
-        return ("rect", depth, cs_h if cs_shape == "round" else cs_h)
+        # Along world X → long side on X
+        return ("rect", depth, diameter)
     else:
-        # Along Y → rect spans diameter (X) × depth (Y)
-        return ("rect", cs_w if cs_shape == "round" else cs_w, depth)
+        # Along world Y → long side on Y
+        return ("rect", diameter, depth)
 
 
 def _extract_sleeves(f) -> list[Sleeve]:
