@@ -348,6 +348,25 @@ export default function DataExplorer({ floorData, onNavigate }: Props) {
         />
       </div>
 
+      {/* Column header */}
+      <div style={{
+        display: "flex",
+        alignItems: "baseline",
+        gap: 14,
+        padding: "8px 4px 8px 46px",
+        fontSize: 10,
+        color: "#9ca3af",
+        textTransform: "uppercase",
+        letterSpacing: 0.6,
+        borderBottom: "1px solid #f3f4f6",
+        background: "#fafafa",
+      }}>
+        <span style={{ width: 64, flexShrink: 0 }}>種別</span>
+        <span style={{ minWidth: 140, flexShrink: 0 }}>名前・P-N</span>
+        <span style={{ width: 180, flexShrink: 0 }}>レイヤー</span>
+        <span style={{ flex: 1 }}>プロパティ</span>
+      </div>
+
       {/* Tree */}
       <div style={{ flex: 1, overflow: "auto", marginLeft: -4 }}>
         {grouped.length === 0 ? (
@@ -428,7 +447,7 @@ export default function DataExplorer({ floorData, onNavigate }: Props) {
                         {r.label}
                       </span>
                       <span style={{
-                        color: "#9ca3af",
+                        color: r.rawLayer ? "#6b7280" : "#d1d5db",
                         fontSize: 10.5,
                         letterSpacing: 0.1,
                         width: 180,
@@ -436,8 +455,9 @@ export default function DataExplorer({ floorData, onNavigate }: Props) {
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
+                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
                       }}>
-                        {r.rawLayer || ""}
+                        {r.rawLayer || "—"}
                       </span>
                       <span style={{
                         color: "#9ca3af",
