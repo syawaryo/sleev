@@ -318,6 +318,49 @@ def check_base_level(
 _RE_PN = re.compile(r"P-N-\d+")
 
 
+_RE_FL_NOTATION = re.compile(r"\d?\s*FL\s*[＋－+\-]?\s*\d+", re.IGNORECASE)
+
+
+def check_horizontal_fl_notation(sleeve: Sleeve) -> list[CheckResult]:
+    """Check #15: horizontal sleeves must record base level + dimension.
+
+    Meaning (from 4/17 meeting):
+        "基準レベルと基準レベルからの寸法を記載したか。例: 1FL+1750, 2FL-55"
+
+    This audit item is ONLY meaningful for horizontal sleeves (横スリーブ =
+    pipe/duct penetrations through a wall). Vertical sleeves (縦スリーブ =
+    through a slab) inherit their elevation from the floor they punch and
+    don't need an explicit FL figure.
+
+    Orientation is populated authoritatively for IFC (main_vecter) and
+    heuristically for DXF (aspect-ratio + pair-detection + label-override).
+    When orientation is unknown, we stay silent rather than NG to avoid
+    dragging the 80 % vertical fleet into false positives.
+    """
+    if sleeve.orientation != "horizontal":
+        return []
+
+    fl_sources = [sleeve.fl_text or "", sleeve.label_text or "", sleeve.diameter_text or ""]
+    has_fl = any(_RE_FL_NOTATION.search(s) for s in fl_sources)
+
+    if has_fl:
+        return [CheckResult(
+            check_id=15,
+            check_name="横スリーブFL記載",
+            severity="OK",
+            sleeve=sleeve,
+            message=f"基準レベル記載あり ({sleeve.fl_text or '-'})",
+        )]
+    return [CheckResult(
+        check_id=15,
+        check_name="横スリーブFL記載",
+        severity="NG",
+        sleeve=sleeve,
+        message="横スリーブに基準レベル(1FL+1750等)の記載なし",
+        related_coords=[sleeve.center],
+    )]
+
+
 def check_sleeve_number(sleeve: Sleeve) -> list[CheckResult]:
     """Check #14: pn_number matches P-N-{digits}."""
     pn = sleeve.pn_number or ""
@@ -1141,6 +1184,7 @@ def run_all_checks(
         results.extend(check_gradient(sleeve, floor_2f.pn_labels, floor_2f.slab_zones, floor_2f.slab_labels, floor_2f.water_gradients))  # #5
         # #8 is now a global check (check_base_level), not per-sleeve
         results.extend(check_sleeve_number(sleeve))        # #14
+        results.extend(check_horizontal_fl_notation(sleeve))  # #15
         results.extend(check_step_slab(sleeve, floor_2f.step_lines))  # #7
 
         if lower_walls:

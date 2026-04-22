@@ -127,12 +127,93 @@ def _refine_sleeve_shape_from_label(sleeve: Sleeve) -> None:
     dt = sleeve.diameter_text or ""
     combined = f"{lt} {dt}"
     if _RE_ROUND_LABEL.search(combined):
+        # Before collapsing geometry, capture the orientation clue: a round
+        # pipe drawn with a highly-elongated rectangular hatching in plan is
+        # almost certainly a horizontal pipe slot through a wall.
+        w0 = sleeve.width or sleeve.diameter
+        h0 = sleeve.height or sleeve.diameter
+        if w0 > 0 and h0 > 0:
+            aspect = max(w0, h0) / min(w0, h0)
+            if aspect >= _ASPECT_HORIZONTAL_MIN:
+                sleeve.orientation = "horizontal"
         sleeve.shape = "round"
         # Collapse width/height to the short side so it renders as a circle
         # sized by the real pipe diameter, not the hatching rectangle.
         if sleeve.diameter > 0:
             sleeve.width = sleeve.diameter
             sleeve.height = sleeve.diameter
+
+
+# Aspect-ratio thresholds for DXF orientation heuristic.
+# Real horizontal pipe/duct penetrations in plan view are very elongated
+# (long thin slot showing pipe length through a wall). Square-ish rects
+# are typically vertical square ducts.
+_ASPECT_HORIZONTAL_MIN = 3.0   # ≥3:1 → confident horizontal
+_ASPECT_VERTICAL_MAX = 1.3     # ≤1.3:1 (near-square) → confident vertical
+
+
+def _infer_sleeve_orientation(sleeve: Sleeve) -> str:
+    """Heuristic vertical/horizontal classifier for DXF sleeves.
+
+    DXF plan view doesn't encode the pipe axis directly, so we infer from
+    the 2D footprint:
+
+    - Round section      → vertical pipe seen from above.
+    - Highly elongated   → horizontal pipe slot through a wall.
+    - Near-square rect   → vertical square duct punch-through.
+    - Everything else    → "" (unknown; second pass may recover via
+                                pair-detection on the full sleeve list).
+    """
+    if sleeve.orientation:
+        return sleeve.orientation  # respect earlier resolution (label override)
+    if sleeve.shape == "round":
+        return "vertical"
+    w = sleeve.width or sleeve.diameter
+    h = sleeve.height or sleeve.diameter
+    long_side = max(w, h)
+    short_side = min(w, h)
+    if short_side <= 0:
+        return ""
+    aspect = long_side / short_side
+    if aspect >= _ASPECT_HORIZONTAL_MIN:
+        return "horizontal"
+    if aspect <= _ASPECT_VERTICAL_MAX:
+        return "vertical"
+    return ""
+
+
+def _infer_orientation_from_pairs(sleeves: list[Sleeve]) -> None:
+    """Second-pass heuristic: mark nearby same-sized sleeve pairs as horizontal.
+
+    A horizontal pipe through a wall is drawn as two matching sleeve marks
+    (entry + exit on either face of the wall). Pair rule:
+    - Similar diameter (±10 %)
+    - Centre-to-centre distance 100–500 mm (wall-thickness range)
+    - Both currently unclassified
+    """
+    _WALL_MIN = 100.0
+    _WALL_MAX = 500.0
+    n = len(sleeves)
+    for i in range(n):
+        a = sleeves[i]
+        if a.orientation:
+            continue
+        if a.diameter <= 0:
+            continue
+        for j in range(i + 1, n):
+            b = sleeves[j]
+            if b.orientation:
+                continue
+            if abs(a.diameter - b.diameter) / max(a.diameter, b.diameter) > 0.10:
+                continue
+            dx = a.center[0] - b.center[0]
+            dy = a.center[1] - b.center[1]
+            dist = math.hypot(dx, dy)
+            if _WALL_MIN <= dist <= _WALL_MAX:
+                a.orientation = "horizontal"
+                b.orientation = "horizontal"
+                break
+
 
 # ---------------------------------------------------------------------------
 # Layer-lookup helpers
@@ -1868,6 +1949,9 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     for s in sleeves:
         s.sleeve_type = _classify_sleeve_type(s.label_text, s.discipline)
         _refine_sleeve_shape_from_label(s)
+        s.orientation = _infer_sleeve_orientation(s)
+    # Second pass: recover "unknown" sleeves via adjacency / pair detection.
+    _infer_orientation_from_pairs(sleeves)
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
     pn_labels = _extract_pn_labels(doc, msp)
