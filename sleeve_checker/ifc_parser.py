@@ -70,45 +70,77 @@ def _parse_tfas_point(raw: str | None) -> tuple[float, float, float] | None:
     return (nums[0], nums[1], nums[2])
 
 
-def _profile_geometry(solid) -> tuple[str, float, float] | None:
-    """Return (shape, width, height) from an IfcExtrudedAreaSolid profile.
+def _profile_and_depth(solid) -> tuple[str, float, float, float] | None:
+    """Return (cross_shape, cross_w, cross_h, depth) from an IfcExtrudedAreaSolid.
 
-    - IfcCircleProfileDef → ("round", d, d) where d = 2 * Radius
-    - IfcRectangleProfileDef → ("rect", XDim, YDim)
+    cross_shape is the CROSS-SECTION of the sleeve body (perpendicular to the
+    extrusion axis). depth is the length along the extrusion axis.
     """
     if not solid.is_a("IfcExtrudedAreaSolid"):
         return None
     prof = solid.SweptArea
+    depth = float(solid.Depth)
     if prof.is_a("IfcCircleProfileDef"):
         d = float(prof.Radius) * 2.0
-        return ("round", d, d)
+        return ("round", d, d, depth)
     if prof.is_a("IfcRectangleProfileDef"):
-        return ("rect", float(prof.XDim), float(prof.YDim))
+        return ("rect", float(prof.XDim), float(prof.YDim), depth)
     return None
 
 
-def _sleeve_geometry(proxy) -> tuple[str, float, float]:
-    """Resolve (shape, width, height) from representation.
+def _sleeve_top_view(proxy, main_vecter: str | None) -> tuple[str, float, float]:
+    """Resolve the plan-view (top-down) shape of a sleeve.
 
-    Handles IfcMappedItem indirection. Returns ("round", 0, 0) if nothing
-    resolvable — caller treats that as "no geometry available".
+    - Vertical sleeve (main_vecter Z-dominant): plan view = the cross-section
+      (circle for round pipes, rectangle for box sleeves).
+    - Horizontal sleeve (main_vecter X/Y-dominant): plan view is a rectangle
+      of (cross-section diameter) × (extrusion length), with the long axis
+      aligned to the main_vecter direction — matches how DXF drafters draw a
+      horizontal sleeve on a floor plan.
     """
     rep = proxy.Representation
     if rep is None:
         return ("round", 0.0, 0.0)
+
+    info: tuple[str, float, float, float] | None = None
     for r in rep.Representations:
         for item in r.Items:
-            if item.is_a("IfcMappedItem"):
-                mapped = item.MappingSource.MappedRepresentation
-                for inner in mapped.Items:
-                    g = _profile_geometry(inner)
-                    if g is not None:
-                        return g
-            else:
-                g = _profile_geometry(item)
-                if g is not None:
-                    return g
-    return ("round", 0.0, 0.0)
+            inner = item.MappingSource.MappedRepresentation.Items[0] if item.is_a("IfcMappedItem") else item
+            got = _profile_and_depth(inner)
+            if got is not None:
+                info = got
+                break
+        if info is not None:
+            break
+    if info is None:
+        return ("round", 0.0, 0.0)
+
+    cs_shape, cs_w, cs_h, depth = info
+
+    ax, ay, az = 0.0, 0.0, 1.0
+    if main_vecter:
+        try:
+            parts = [float(v) for v in str(main_vecter).split(",")[:3]]
+            if len(parts) == 3:
+                ax, ay, az = parts
+        except (TypeError, ValueError):
+            pass
+
+    # Vertical → plan view is the cross-section itself
+    if abs(az) > max(abs(ax), abs(ay)):
+        return (cs_shape, cs_w, cs_h)
+
+    # Horizontal → rectangular footprint on the floor plan.
+    # Width/height depend on whether the main axis is X or Y in world coords.
+    # For round cross-section: cs_w == cs_h == diameter.
+    # For rectangular cross-section: cs_w, cs_h live in the profile's local
+    # plane (perpendicular to extrusion). We assume XDim ≈ horizontal width.
+    if abs(ax) > abs(ay):
+        # Along X → rect spans depth (X) × diameter (Y)
+        return ("rect", depth, cs_h if cs_shape == "round" else cs_h)
+    else:
+        # Along Y → rect spans diameter (X) × depth (Y)
+        return ("rect", cs_w if cs_shape == "round" else cs_w, depth)
 
 
 def _extract_sleeves(f) -> list[Sleeve]:
@@ -148,23 +180,24 @@ def _extract_sleeves(f) -> list[Sleeve]:
         # Orientation: main_vecter is the principal axis of the pipe/duct
         # passing through the sleeve. Z-dominant → vertical (縦管), otherwise
         # horizontal (横管). Stored as "(x,y,z)" string in the Tfas export.
-        orientation = ""
         mv_str = bridge_common.get("main_vecter") or bridge_common.get("main_vector") or ""
+        orientation = ""
         if mv_str:
             try:
                 parts = [float(v) for v in str(mv_str).split(",")[:3]]
                 if len(parts) == 3:
                     ax, ay, az = parts
-                    # |z| dominant → vertical pipe; else horizontal.
-                    if abs(az) > max(abs(ax), abs(ay)):
-                        orientation = "vertical"
-                    else:
-                        orientation = "horizontal"
+                    orientation = "vertical" if abs(az) > max(abs(ax), abs(ay)) else "horizontal"
             except (TypeError, ValueError):
                 pass
 
-        shape, width, height = _sleeve_geometry(p)
-        # For round: diameter = width (== height). For rect: short cross-section.
+        # Plan-view shape: horizontal sleeves become rectangles on the floor
+        # plan (diameter × extrusion length) even if their cross-section is
+        # circular, matching how DXF drafters draw them.
+        shape, width, height = _sleeve_top_view(p, mv_str)
+        # For round plan-view: diameter == width == height.
+        # For rect plan-view: use the *short* side as the nominal "diameter"
+        # (pipe/duct cross-section), with the long side = extrusion depth.
         diameter = min(width, height) if shape == "rect" else width
 
         # Synthesise the "nominal + outer" diameter_text format that check #3
