@@ -858,9 +858,26 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
 
     wall_lines: list[WallLine] = []
 
-    # No _in_building_range filter here: outer perimeter walls legitimately
-    # extend past the hardcoded BLDG_X/Y bounds. Layer membership alone is a
-    # reliable discriminator because wall_layers is already vetted by name.
+    # Detail-drawing walls (legend panels, section cuts, title blocks) land
+    # on the same *_壁心 / *_RC壁 layers but live in the sheet margins. A
+    # 2 m tolerance past the BLDG_X/Y bounds keeps real outer walls
+    # (thickness + finishes rarely exceed 2 m past grids) while rejecting
+    # detail panels that sit 6 m+ outside the footprint.
+    _WALL_RANGE_TOL = 2000.0
+
+    def _wall_in_building(sx: float, sy: float, ex: float, ey: float) -> bool:
+        # Accept only if the entire segment (both endpoints) is within the
+        # tolerant bbox. Midpoint alone let long margin-to-plan walls slip
+        # through whenever their midpoint happened to land inside.
+        lo_x = BLDG_X_MIN - _WALL_RANGE_TOL
+        hi_x = BLDG_X_MAX + _WALL_RANGE_TOL
+        lo_y = BLDG_Y_MIN - _WALL_RANGE_TOL
+        hi_y = BLDG_Y_MAX + _WALL_RANGE_TOL
+        return (
+            lo_x <= sx <= hi_x and lo_x <= ex <= hi_x
+            and lo_y <= sy <= hi_y and lo_y <= ey <= hi_y
+        )
+
     for entity in msp:
         layer = entity.dxf.layer
         if layer not in set(wall_layers):
@@ -871,6 +888,8 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
         if entity.dxftype() == "LINE":
             sx, sy = entity.dxf.start.x, entity.dxf.start.y
             ex, ey = entity.dxf.end.x, entity.dxf.end.y
+            if not _wall_in_building(sx, sy, ex, ey):
+                continue
             wall_lines.append(
                 WallLine(start=(sx, sy), end=(ex, ey), layer=layer, wall_type=wtype)
             )
@@ -880,12 +899,16 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
             for i in range(len(pts) - 1):
                 sx, sy = float(pts[i][0]), float(pts[i][1])
                 ex, ey = float(pts[i + 1][0]), float(pts[i + 1][1])
+                if not _wall_in_building(sx, sy, ex, ey):
+                    continue
                 wall_lines.append(
                     WallLine(start=(sx, sy), end=(ex, ey), layer=layer, wall_type=wtype)
                 )
             if entity.is_closed and len(pts) >= 2:
                 sx, sy = float(pts[-1][0]), float(pts[-1][1])
                 ex, ey = float(pts[0][0]), float(pts[0][1])
+                if not _wall_in_building(sx, sy, ex, ey):
+                    continue
                 wall_lines.append(
                     WallLine(start=(sx, sy), end=(ex, ey), layer=layer, wall_type=wtype)
                 )
