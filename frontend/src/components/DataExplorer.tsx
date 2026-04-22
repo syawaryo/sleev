@@ -94,9 +94,14 @@ function collectRows(fd: FloorData): EntityRow[] {
   const rows: EntityRow[] = [];
 
   fd.sleeves.forEach((s) => {
-    const size = s.shape === "rect"
-      ? `□${s.width ?? "?"}×${s.height ?? "?"}`
-      : `ø${s.diameter}`;
+    const isHorizontal = s.orientation === "horizontal";
+    // Horizontal sleeves: plan-view rect is (pipe length × bore), not the
+    // physical cross-section — show φbore instead of W×H.
+    const size = isHorizontal
+      ? `横φ${Math.round(s.diameter)}`
+      : (s.shape === "rect"
+          ? `□${Math.round(s.width ?? 0)}×${Math.round(s.height ?? 0)}`
+          : `φ${Math.round(s.diameter)}`);
     const props = [
       size,
       s.fl_text,

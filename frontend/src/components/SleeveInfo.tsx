@@ -5,6 +5,41 @@ interface Props {
   results: CheckResult[];
 }
 
+function renderResultCard(r: CheckResult, prefix: string, i: number) {
+  const isNg = r.severity === "NG";
+  const palette = isNg
+    ? { bg: "#fef2f2", border: "#ef4444", id: "#dc2626", title: "#991b1b" }
+    : { bg: "#fffbeb", border: "#fbbf24", id: "#d97706", title: "#92400e" };
+  const hasStructured = !!(r.target || r.rule || r.expected || r.found || r.fix_hint);
+
+  const Row = ({ label, value, accent }: { label: string; value: string; accent?: boolean }) => (
+    <>
+      <div style={{ color: "#9ca3af", fontSize: 10, fontWeight: 500 }}>{label}</div>
+      <div style={{ color: accent ? palette.id : "#374151", fontSize: 11, fontWeight: accent ? 600 : 400, lineHeight: 1.45 }}>{value}</div>
+    </>
+  );
+
+  return (
+    <div key={`${prefix}${i}`} style={{ background: palette.bg, borderLeft: `3px solid ${palette.border}`, padding: "8px 10px", borderRadius: "0 6px 6px 0", marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: hasStructured ? 6 : 3 }}>
+        <span style={{ color: palette.id, fontWeight: 700, fontSize: 11 }}>#{r.check_id}</span>
+        <span style={{ color: palette.title, fontSize: 12, fontWeight: 600 }}>{r.check_name}</span>
+      </div>
+      {hasStructured ? (
+        <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", rowGap: 3, columnGap: 8 }}>
+          {r.target && <Row label="対象" value={r.target} />}
+          {r.rule && <Row label="基準" value={r.rule} />}
+          {r.expected && <Row label="期待" value={r.expected} />}
+          {r.found && <Row label="検出" value={r.found} accent />}
+          {r.fix_hint && <Row label="対応" value={r.fix_hint} />}
+        </div>
+      ) : (
+        <div style={{ color: "#6b7280", fontSize: 11 }}>{r.message}</div>
+      )}
+    </div>
+  );
+}
+
 export default function SleeveInfo({ sleeve, results }: Props) {
   const sleeveResults = results.filter((r) => r.sleeve_id === sleeve.id);
   const ngResults = sleeveResults.filter((r) => r.severity === "NG");
@@ -20,7 +55,16 @@ export default function SleeveInfo({ sleeve, results }: Props) {
     cable: "電気",
   };
   const typeLabel = sleeve.sleeve_type ? SLEEVE_TYPE_LABEL[sleeve.sleeve_type] : null;
-  const shapeLabel = sleeve.shape === "rect" ? "角" : "丸";
+  const isHorizontal = sleeve.orientation === "horizontal";
+  // Horizontal sleeves are wall penetrations — their plan-view rect is
+  // (pipe length × bore), not the physical cross-section. Display the bore.
+  const shapeLabel = isHorizontal ? "横" : (sleeve.shape === "rect" ? "角" : "丸");
+  const sizeText =
+    isHorizontal
+      ? `横 φ${Math.round(sleeve.diameter)}mm`
+      : (sleeve.shape === "rect" && sleeve.width && sleeve.height
+          ? `${shapeLabel} ${Math.round(sleeve.width)}×${Math.round(sleeve.height)}mm`
+          : `${shapeLabel} φ${Math.round(sleeve.diameter)}mm`);
 
   const worst = ngResults.length > 0 ? "NG" : warnResults.length > 0 ? "WARNING" : "OK";
   const badgeStyle: Record<string, { bg: string; color: string }> = {
@@ -45,9 +89,7 @@ export default function SleeveInfo({ sleeve, results }: Props) {
       <div style={{ padding: "12px 16px", borderBottom: "1px solid #f3f4f6" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>形状/寸法</div><div style={{ color: "#111827", fontWeight: 600 }}>
-            {sleeve.shape === "rect" && sleeve.width && sleeve.height
-              ? `${shapeLabel} ${Math.round(sleeve.width)}×${Math.round(sleeve.height)}mm`
-              : `${shapeLabel} ${sleeve.diameter}mm`}
+            {sizeText}
           </div></div>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>FL</div><div style={{ color: "#111827", fontWeight: 600 }}>{sleeve.fl_text || "-"}</div></div>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>種別</div><div style={{ color: "#374151" }}>
@@ -63,25 +105,8 @@ export default function SleeveInfo({ sleeve, results }: Props) {
           チェック結果
         </div>
 
-        {ngResults.map((r, i) => (
-          <div key={`ng${i}`} style={{ background: "#fef2f2", borderLeft: "3px solid #ef4444", padding: "8px 10px", borderRadius: "0 6px 6px 0", marginBottom: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ color: "#dc2626", fontWeight: 700, fontSize: 11 }}>#{r.check_id}</span>
-              <span style={{ color: "#991b1b", fontSize: 12 }}>{r.check_name}</span>
-            </div>
-            <div style={{ color: "#6b7280", fontSize: 11, marginTop: 3 }}>{r.message}</div>
-          </div>
-        ))}
-
-        {warnResults.map((r, i) => (
-          <div key={`w${i}`} style={{ background: "#fffbeb", borderLeft: "3px solid #fbbf24", padding: "8px 10px", borderRadius: "0 6px 6px 0", marginBottom: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ color: "#d97706", fontWeight: 700, fontSize: 11 }}>#{r.check_id}</span>
-              <span style={{ color: "#92400e", fontSize: 12 }}>{r.check_name}</span>
-            </div>
-            <div style={{ color: "#6b7280", fontSize: 11, marginTop: 3 }}>{r.message}</div>
-          </div>
-        ))}
+        {ngResults.map((r, i) => renderResultCard(r, "ng", i))}
+        {warnResults.map((r, i) => renderResultCard(r, "w", i))}
 
         {okCount > 0 && (
           <div style={{ color: "#9ca3af", fontSize: 11, marginTop: 8 }}>

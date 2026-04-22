@@ -42,6 +42,23 @@ _DEFAULT_WALL_THICKNESS: dict[str, float] = {
     "不明": 200,
 }
 
+
+def _sleeve_target(sleeve: Sleeve) -> str:
+    """Human-readable 'what was inspected' label for a sleeve.
+
+    Format: "スリーブ P-N-12 (空調) / [空調]F141_..."
+    Falls back gracefully when pn_number / discipline / layer are empty.
+    """
+    pn = (sleeve.pn_number or "").strip() or "(番号なし)"
+    disc = (sleeve.discipline or "").strip()
+    layer = (sleeve.layer or "").strip()
+    head = f"スリーブ {pn}"
+    if disc:
+        head += f" ({disc})"
+    if layer:
+        return f"{head} / {layer}"
+    return head
+
 # ---------------------------------------------------------------------------
 # #2 check_discipline
 # ---------------------------------------------------------------------------
@@ -62,6 +79,11 @@ def check_discipline(sleeve: Sleeve) -> list[CheckResult]:
         severity="NG",
         sleeve=sleeve,
         message="設備種別ラベルなし",
+        target=_sleeve_target(sleeve),
+        rule="スリーブ近傍のラベルテキストに設備種別コードが含まれること",
+        expected="EA / OA / SA / RA / KEA（空調）, CW / RD / SD / HW（衛生）, XS / KD / KV（電気）等",
+        found="ラベルテキスト なし",
+        fix_hint="スリーブに設備種別コードを含むラベルを追記する",
     )]
 
 
@@ -72,18 +94,61 @@ def check_discipline(sleeve: Sleeve) -> list[CheckResult]:
 _RE_OUTER = re.compile(r"外径\s*\d+\s*[φΦø]?")
 # Match φ+number, number+φ, or number+A (pipe size like 150A)
 _RE_PHI_NUM = re.compile(r"(\d+)\s*[φΦø]|[φΦø]\s*(\d+)|(\d+)A\b")
+# Match W×H / W x H (box-sleeve dimension, e.g. "500×300", "1000x500", "500 X 600")
+_RE_RECT_DIM = re.compile(r"\d+\s*[x×X]\s*\d+")
 
 
 def check_diameter_label(sleeve: Sleeve) -> list[CheckResult]:
-    """Check #3: diameter_text contains both nominal diameter (呼び口径) and outer diameter (外径)."""
+    """Check #3: sleeve size annotation is present on the drawing.
+
+    Shape-aware rule:
+    - **Vertical 角スリーブ (rectangular box through slab)**: the drafting
+      convention is to write a W×H outer dimension (e.g. "500×300"). The
+      concept of 内径/外径 does not apply here — one dimension pair is
+      sufficient.
+    - **Round slab penetrations AND horizontal wall penetrations**: the
+      conventional rule applies (呼び口径φ and 外径φ both recorded). Even
+      when a horizontal round sleeve is drawn as a long rectangle on the
+      plan, the underlying object is a circular pipe so the round rule
+      is what matters for 施工 + 構造.
+    """
     txt = sleeve.diameter_text or ""
-    # Also check label_text — full-form texts like "KD 175φ(外径180φ)100A"
-    # may land in label_text when the equipment code matched
     label = sleeve.label_text or ""
     combined = f"{txt} {label}"
 
+    is_horizontal = (sleeve.orientation or "").lower() == "horizontal"
+    is_rect_box = sleeve.shape == "rect" and not is_horizontal
+
+    if is_rect_box:
+        # For box sleeves the W×H dimension lives in the rectangle geometry
+        # itself (the drafter draws the box at scale; there's no text W×H).
+        # We consider the dimension "recorded" whenever both sides exist.
+        w = float(getattr(sleeve, "width", 0.0) or 0.0)
+        h = float(getattr(sleeve, "height", 0.0) or 0.0)
+        if w > 0 and h > 0:
+            return [CheckResult(
+                check_id=3,
+                check_name="口径・外径記載",
+                severity="OK",
+                sleeve=sleeve,
+                message=f"角スリーブ寸法 {int(round(w))}×{int(round(h))}",
+            )]
+        return [CheckResult(
+            check_id=3,
+            check_name="口径・外径記載",
+            severity="NG",
+            sleeve=sleeve,
+            message="角スリーブ: W×H寸法が取得できない",
+            related_coords=[sleeve.center],
+            target=_sleeve_target(sleeve),
+            rule="角スリーブは矩形ジオメトリから W×H 寸法が取得できること",
+            expected="width > 0 かつ height > 0",
+            found=f"width={w:.0f}, height={h:.0f}",
+            fix_hint="角スリーブの矩形ジオメトリを修正し W×H を入れる",
+        )]
+
+    # Round / horizontal-wall-penetration: need nominal + outer both recorded
     has_outer = bool(_RE_OUTER.search(combined))
-    # To detect nominal diameter, strip out 外径 portions first so "外径230φ" doesn't false-match
     stripped = _RE_OUTER.sub("", combined)
     has_nominal = bool(_RE_PHI_NUM.search(stripped))
 
@@ -109,6 +174,11 @@ def check_diameter_label(sleeve: Sleeve) -> list[CheckResult]:
         sleeve=sleeve,
         message=f"{'・'.join(missing)}の記載なし",
         related_coords=[sleeve.center],
+        target=_sleeve_target(sleeve),
+        rule="ラベルに呼び口径 (例: 200φ) と外径 (例: 外径216φ) の両方が記載されていること",
+        expected='例: "200φ 外径216φ"',
+        found=f'label="{label.strip() or "-"}" / diameter_text="{txt.strip() or "-"}"（{"・".join(missing)} 未検出）',
+        fix_hint=f"{'・'.join(missing)}をラベルに追記する",
     )]
 
 
@@ -211,6 +281,11 @@ def check_gradient(
             sleeve=sleeve,
             message=f"排水スリーブ 勾配確認要 | {detail_str}",
             related_coords=[sleeve.center],
+            target=_sleeve_target(sleeve),
+            rule="排水スリーブの勾配方向・FL値・配管番号の整合を目視確認する",
+            expected="FL値 + 水勾配方向 + 配管番号 がすべて明記されている",
+            found=detail_str,
+            fix_hint="勾配方向と排水経路が設計意図と一致しているか目視確認する",
         )]
 
     if not has_fl:
@@ -221,6 +296,11 @@ def check_gradient(
             sleeve=sleeve,
             message=f"排水スリーブ FL記載なし | {detail_str}",
             related_coords=[sleeve.center],
+            target=_sleeve_target(sleeve),
+            rule="排水スリーブには勾配情報（FL値または水勾配記号）が必要",
+            expected="FL±値の記載 または 水勾配矢印 (↓↑→←)",
+            found=detail_str,
+            fix_hint="FL値を追記、もしくは近傍に水勾配記号を配置する",
         )]
 
     return [CheckResult(
@@ -239,6 +319,9 @@ def check_gradient(
 _RE_BASE_LEVEL = re.compile(r"\dFL\s*[＝=]", re.IGNORECASE)
 
 
+_RE_FL_NOTATION = re.compile(r"\d?\s*FL\s*[＋－+\-]?\s*\d+", re.IGNORECASE)
+
+
 def check_base_level(
     sleeves: list[Sleeve],
 ) -> list[CheckResult]:
@@ -249,16 +332,15 @@ def check_base_level(
     where to cut the opening. Vertical sleeves (slab penetrations) do not
     need this check — their elevation is the slab itself.
 
-    Per-sleeve NG when a horizontal sleeve has no FL text; OK when fl_text
-    is populated with a recognisable FL±N notation.
+    Sources searched for the FL pattern: fl_text, label_text, diameter_text.
+    Per-sleeve NG when no source matches; OK otherwise.
     """
     results: list[CheckResult] = []
-    fl_re = re.compile(r"\d?\s*FL\s*[＋－+\-]?\s*\d+", re.IGNORECASE)
     for s in sleeves:
         if (s.orientation or "").lower() != "horizontal":
             continue
-        txt = (s.fl_text or "") + " " + (s.label_text or "")
-        if fl_re.search(txt):
+        sources = [s.fl_text or "", s.label_text or "", s.diameter_text or ""]
+        if any(_RE_FL_NOTATION.search(src) for src in sources):
             results.append(CheckResult(
                 check_id=8,
                 check_name="基準レベル記載",
@@ -272,8 +354,13 @@ def check_base_level(
                 check_name="基準レベル記載",
                 severity="NG",
                 sleeve=s,
-                message="横スリーブに基準レベル（FL±値）の記載なし",
+                message="横スリーブに基準レベル（1FL+1750等）の記載なし",
                 related_coords=[s.center],
+                target=_sleeve_target(s),
+                rule="横スリーブ（壁貫通）は fl_text / label_text / diameter_text のいずれかに FL±値 を持つこと",
+                expected='例: "1FL+1750", "2FL-55"',
+                found=f'fl_text="{(s.fl_text or "-").strip()}" / label="{(s.label_text or "-").strip()}" / diameter_text="{(s.diameter_text or "-").strip()}"',
+                fix_hint="基準レベル（1FL+1750 等）をラベルに追記する",
             ))
     return results
 
@@ -283,49 +370,6 @@ def check_base_level(
 # ---------------------------------------------------------------------------
 
 _RE_PN = re.compile(r"P-N-\d+")
-
-
-_RE_FL_NOTATION = re.compile(r"\d?\s*FL\s*[＋－+\-]?\s*\d+", re.IGNORECASE)
-
-
-def check_horizontal_fl_notation(sleeve: Sleeve) -> list[CheckResult]:
-    """Check #15: horizontal sleeves must record base level + dimension.
-
-    Meaning (from 4/17 meeting):
-        "基準レベルと基準レベルからの寸法を記載したか。例: 1FL+1750, 2FL-55"
-
-    This audit item is ONLY meaningful for horizontal sleeves (横スリーブ =
-    pipe/duct penetrations through a wall). Vertical sleeves (縦スリーブ =
-    through a slab) inherit their elevation from the floor they punch and
-    don't need an explicit FL figure.
-
-    Orientation is populated authoritatively for IFC (main_vecter) and
-    heuristically for DXF (aspect-ratio + pair-detection + label-override).
-    When orientation is unknown, we stay silent rather than NG to avoid
-    dragging the 80 % vertical fleet into false positives.
-    """
-    if sleeve.orientation != "horizontal":
-        return []
-
-    fl_sources = [sleeve.fl_text or "", sleeve.label_text or "", sleeve.diameter_text or ""]
-    has_fl = any(_RE_FL_NOTATION.search(s) for s in fl_sources)
-
-    if has_fl:
-        return [CheckResult(
-            check_id=15,
-            check_name="横スリーブFL記載",
-            severity="OK",
-            sleeve=sleeve,
-            message=f"基準レベル記載あり ({sleeve.fl_text or '-'})",
-        )]
-    return [CheckResult(
-        check_id=15,
-        check_name="横スリーブFL記載",
-        severity="NG",
-        sleeve=sleeve,
-        message="横スリーブに基準レベル(1FL+1750等)の記載なし",
-        related_coords=[sleeve.center],
-    )]
 
 
 def check_sleeve_number(sleeve: Sleeve) -> list[CheckResult]:
@@ -346,6 +390,11 @@ def check_sleeve_number(sleeve: Sleeve) -> list[CheckResult]:
         sleeve=sleeve,
         message="P-N-番号記載なし・形式不正",
         related_coords=[sleeve.center],
+        target=_sleeve_target(sleeve),
+        rule="各スリーブに P-N-{数字} 形式の番号が振られていること",
+        expected='例: "P-N-1", "P-N-23"',
+        found=f'pn_number="{(sleeve.pn_number or "").strip() or "-"}"',
+        fix_hint="スリーブに P-N 引出線と番号を追記する",
     )]
 
 
@@ -399,6 +448,11 @@ def check_lower_wall(
                 sleeve=sleeve,
                 message=f"下階壁（{wtype}）との距離 {dist:.1f}mm < しきい値 {threshold:.1f}mm",
                 related_coords=[sleeve.center, wall.start, wall.end],
+                target=_sleeve_target(sleeve),
+                rule=f"スリーブ中心と下階壁（{wtype}）中心線の距離 ≥ スリーブ半径 + 壁厚/2",
+                expected=f"距離 ≥ {threshold:.1f}mm",
+                found=f"距離 {dist:.1f}mm（{wall.layer or '下階壁'}）",
+                fix_hint="スリーブ位置を下階壁から離すか、下階の壁配置を確認する",
             ))
 
     if not results:
@@ -442,6 +496,11 @@ def check_step_slab(
                 sleeve=sleeve,
                 message=f"スリーブ端が段差線に重なっている（端から段差線まで {edge_dist:.1f}mm）",
                 related_coords=[sleeve.center, step.start, step.end],
+                target=_sleeve_target(sleeve),
+                rule="スリーブ円が段差線に重ならないこと",
+                expected="スリーブ端から段差線まで > 0mm",
+                found=f"端から段差線まで {edge_dist:.1f}mm（{step.layer or 'スラブ段差'}）",
+                fix_hint="スリーブを段差線から離す",
             ))
 
     if recess_polygons:
@@ -454,6 +513,11 @@ def check_step_slab(
                     sleeve=sleeve,
                     message="床ヌスミ内にスリーブがあり、残コンクリート厚不足のおそれ",
                     related_coords=[sleeve.center, *recess.vertices],
+                    target=_sleeve_target(sleeve),
+                    rule="スリーブ中心が床ヌスミ（凹み）ポリゴン内にないこと",
+                    expected="ヌスミ外",
+                    found=f"ヌスミ内（{recess.layer or '床ヌスミ'}）",
+                    fix_hint="スリーブをヌスミ領域外へ移動する。残コンクリート厚を再確認する",
                 ))
 
     if not results:
@@ -522,6 +586,11 @@ def check_step_dim(
                     sleeve=sleeve,
                     message=f"寸法の参照点が段差線上: {pt}",
                     related_coords=[pt, sleeve.center],
+                    target=_sleeve_target(sleeve),
+                    rule="寸法チェーンの参照点は段差線・ヌスミ線上にあってはならない（段差はずれる可能性があり基準として不適切）",
+                    expected="寸法参照点は通り芯または躯体線上",
+                    found=f"参照点 ({pt[0]:.0f}, {pt[1]:.0f}) が段差線上",
+                    fix_hint="寸法の基準を通り芯側に変更する",
                 ))
 
     if not results:
@@ -572,6 +641,11 @@ def check_sleeve_center_dim(
                 sleeve=s,
                 message=f"{'・'.join(missing)}方向の寸法が通り芯に帰着しない（スリーブ芯のみ）",
                 related_coords=[s.center],
+                target=_sleeve_target(s),
+                rule="スリーブ芯から発する寸法チェーンが、他スリーブ経由を含め、最終的に通り芯まで到達すること",
+                expected="X方向・Y方向とも通り芯まで到達",
+                found=f"{'・'.join(missing)}方向: 通り芯に到達せずスリーブ間のみで完結",
+                fix_hint=f"{'・'.join(missing)}方向に通り芯と結ぶ寸法を追加（直接 or 既に通り芯に接続済みの別スリーブ経由）",
             ))
     return results
 
@@ -628,6 +702,11 @@ def check_column_wall_dim(
                     sleeve=sleeve,
                     message=f"寸法の参照点が柱・壁仕上線上: {pt}",
                     related_coords=[pt, sleeve.center],
+                    target=_sleeve_target(sleeve),
+                    rule="スリーブ位置寸法の参照点は柱外周線・壁仕上線上にあってはならない（通り芯基準が望ましい）",
+                    expected="寸法参照点は通り芯または躯体線",
+                    found=f"参照点 ({pt[0]:.0f}, {pt[1]:.0f}) が柱外周線または壁仕上線上",
+                    fix_hint="寸法の基準を通り芯または躯体線に変更する",
                 ))
 
     if not results:
@@ -793,6 +872,11 @@ def check_dim_sum(
                         f"(始点差: {d_start:.0f}mm, 終点差: {d_end:.0f}mm)"
                     ),
                     related_coords=coords,
+                    target=f"通り芯 {g_start.axis_label}–{g_end.axis_label} ({axis}方向) 寸法チェーン",
+                    rule=f"寸法チェーンの始点・終点が通り芯にスナップしている（許容 {GRID_SNAP_STRICT:.0f}mm 以内）",
+                    expected=f"始点差 ≤ {GRID_SNAP_STRICT:.0f}mm, 終点差 ≤ {GRID_SNAP_STRICT:.0f}mm",
+                    found=f"始点差: {d_start:.0f}mm, 終点差: {d_end:.0f}mm",
+                    fix_hint="寸法チェーンの端点を通り芯にスナップし直す",
                 ))
                 continue
 
@@ -826,6 +910,11 @@ def check_dim_sum(
                         f"差: {diff:+.0f}mm"
                     ),
                     related_coords=coords,
+                    target=f"通り芯 {g_start.axis_label}–{g_end.axis_label} ({axis}方向) 寸法チェーン",
+                    rule=f"寸法チェーンの合計が通り芯間距離と一致する（許容 {SUM_TOLERANCE:.0f}mm 以内）",
+                    expected=f"合計 = 通り芯間 {grid_span:.0f}mm (±{SUM_TOLERANCE:.0f}mm)",
+                    found=f"寸法: {dim_vals} → 合計 {chain_sum:.0f}mm（差 {diff:+.0f}mm）",
+                    fix_hint="寸法値を見直して合計を通り芯間距離と一致させる",
                 ))
 
     def _is_horizontal(d: DimLine) -> bool | None:
@@ -1062,6 +1151,11 @@ def check_position_determinacy(
                 sleeve=s,
                 message=f"{'・'.join(missing)}方向の位置が寸法から特定できません",
                 related_coords=[s.center],
+                target=_sleeve_target(s),
+                rule="スリーブ位置がX方向・Y方向ともに寸法チェーンから特定できること（通り芯への帰着経路が存在）",
+                expected="X方向・Y方向とも位置特定可能",
+                found=f"{'・'.join(missing)}方向: 位置特定不可（通り芯へのチェーン経路なし）",
+                fix_hint=f"{'・'.join(missing)}方向にスリーブ芯を参照する寸法を追加する",
             ))
 
     return results, x_resolved, y_resolved
@@ -1115,9 +1209,14 @@ def check_dim_notation(dims: list[DimLine]) -> list[CheckResult]:
         return [CheckResult(
             check_id=13,
             check_name="寸法表記統一",
-            severity="WARNING",
+            severity="NG",
             sleeve=None,
             message=f"寸法表記が混在しています: {sorted(patterns_found)}",
+            target="図面全体の寸法テキスト",
+            rule="寸法表記フォーマット（カンマ区切り / 単位 / 小数桁）は図面内で統一されていること",
+            expected="単一の表記パターン",
+            found=f"混在パターン: {sorted(patterns_found)}",
+            fix_hint="寸法表記を一つのパターンに統一する（例: 全て カンマ区切りなし・整数 mm）",
         )]
 
     return [CheckResult(
@@ -1169,10 +1268,12 @@ def run_all_checks(
         results.extend(check_gradient(sleeve, floor_2f.pn_labels, floor_2f.slab_zones, floor_2f.slab_labels, floor_2f.water_gradients))  # #5
         # #8 is now a global check (check_base_level), not per-sleeve
         results.extend(check_sleeve_number(sleeve))        # #14
-        results.extend(check_horizontal_fl_notation(sleeve))  # #15
         results.extend(check_step_slab(sleeve, floor_2f.step_lines, floor_2f.recess_polygons))  # #7
 
-        if lower_walls:
+        if lower_walls and (sleeve.orientation or "").lower() != "horizontal":
+            # Check #6 is about vertical (slab-penetration) sleeves not sitting
+            # over a lower-floor wall. Horizontal sleeves *are* wall penetrations
+            # by definition, so the interference concept doesn't apply.
             results.extend(check_lower_wall(sleeve, lower_walls, wall_thickness))  # #6
 
     # --- Global level check ---
