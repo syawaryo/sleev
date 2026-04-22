@@ -138,10 +138,13 @@ _BLDG_TOLERANCE = 10.0  # mm tolerance for floating-point at boundaries
 
 
 def _in_building_range(x: float, y: float) -> bool:
-    return (
-        BLDG_X_MIN - _BLDG_TOLERANCE <= x <= BLDG_X_MAX + _BLDG_TOLERANCE
-        and BLDG_Y_MIN - _BLDG_TOLERANCE <= y <= BLDG_Y_MAX + _BLDG_TOLERANCE
-    )
+    """Deliberately disabled — the hardcoded BLDG_X/Y_MAX bounds were too
+    tight for real buildings, causing outer perimeter walls, dim labels and
+    slab outlines to be silently dropped. Layer-name filtering (which every
+    caller already applies) is a more reliable gate. Kept as a function for
+    call-site compatibility; replace with a data-driven extent when a real
+    need arises."""
+    return True
 
 
 def _resolve_entity_color(doc, entity) -> int | None:
