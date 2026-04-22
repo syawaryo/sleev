@@ -11,13 +11,14 @@ import math
 import re
 from collections import defaultdict
 
-from .geometry import point_to_segment_distance, points_match, point_on_any_segment
+from .geometry import point_to_segment_distance, points_match, point_on_any_segment, point_in_polygon
 from .models import (
     CheckResult,
     ColumnLine,
     DimLine,
     FloorData,
     GridLine,
+    RecessPolygon,
     SlabLabel,
     Sleeve,
     StepLine,
@@ -239,75 +240,41 @@ _RE_BASE_LEVEL = re.compile(r"\dFL\s*[＝=]", re.IGNORECASE)
 
 
 def check_base_level(
-    slab_labels: list[SlabLabel],
-    has_base_level_def: bool = False,
+    sleeves: list[Sleeve],
 ) -> list[CheckResult]:
-    """Check #8: base level definition exists and each slab has level info.
+    """Check #8: every horizontal sleeve (壁貫通) must carry a FL reference.
 
-    Parameters
-    ----------
-    slab_labels:
-        All SlabLabel objects extracted from F308 layers.
-    has_base_level_def:
-        Whether the drawing contains a base level definition
-        (e.g. ``1FL＝B1FL+5150``).
+    Rationale: a horizontal sleeve goes through a wall at a specific height.
+    Without an explicit FL value on the drawing, the installer cannot know
+    where to cut the opening. Vertical sleeves (slab penetrations) do not
+    need this check — their elevation is the slab itself.
+
+    Per-sleeve NG when a horizontal sleeve has no FL text; OK when fl_text
+    is populated with a recognisable FL±N notation.
     """
     results: list[CheckResult] = []
-
-    # 1. Base level definition check
-    if has_base_level_def:
-        results.append(CheckResult(
-            check_id=8,
-            check_name="基準レベル記載",
-            severity="OK",
-            sleeve=None,
-            message="基準レベル定義あり",
-        ))
-    else:
-        results.append(CheckResult(
-            check_id=8,
-            check_name="基準レベル記載",
-            severity="NG",
-            sleeve=None,
-            message="基準レベル（1FL等）の定義なし",
-        ))
-
-    # 2. Per-slab-number level check
-    if not slab_labels:
-        results.append(CheckResult(
-            check_id=8,
-            check_name="基準レベル記載",
-            severity="NG",
-            sleeve=None,
-            message="スラブラベルが図面に存在しない",
-        ))
-        return results
-
-    # Group by slab number
-    slab_map: dict[str, list[SlabLabel]] = defaultdict(list)
-    for sl in slab_labels:
-        slab_map[sl.slab_no].append(sl)
-
-    for slab_no, labels in sorted(slab_map.items()):
-        has_level = any(sl.level.strip() for sl in labels)
-        if has_level:
-            levels = sorted({sl.level for sl in labels if sl.level.strip()})
+    fl_re = re.compile(r"\d?\s*FL\s*[＋－+\-]?\s*\d+", re.IGNORECASE)
+    for s in sleeves:
+        if (s.orientation or "").lower() != "horizontal":
+            continue
+        txt = (s.fl_text or "") + " " + (s.label_text or "")
+        if fl_re.search(txt):
             results.append(CheckResult(
                 check_id=8,
                 check_name="基準レベル記載",
                 severity="OK",
-                sleeve=None,
-                message=f"{slab_no}: 高さ記載あり ({', '.join(levels[:3])})",
+                sleeve=s,
+                message=f"基準レベル記載あり ({(s.fl_text or '').strip()})",
             ))
         else:
             results.append(CheckResult(
                 check_id=8,
                 check_name="基準レベル記載",
                 severity="NG",
-                sleeve=None,
-                message=f"{slab_no}: 高さ記載なし",
+                sleeve=s,
+                message="横スリーブに基準レベル（FL±値）の記載なし",
+                related_coords=[s.center],
             ))
-
     return results
 
 
@@ -453,8 +420,14 @@ def check_lower_wall(
 def check_step_slab(
     sleeve: Sleeve,
     step_lines: list[StepLine],
+    recess_polygons: list[RecessPolygon] | None = None,
 ) -> list[CheckResult]:
-    """Check #7: sleeve must not overlap with slab step lines."""
+    """Check #7: sleeve must not overlap slab step lines or sit inside a floor recess.
+
+    Two independent geometric conditions produce NG under this check:
+    - スリーブ端が段差線に重なる (point-to-segment distance ≤ radius)
+    - スリーブ芯が床ヌスミ内にある (point-in-polygon)
+    """
     results: list[CheckResult] = []
     radius = sleeve.diameter / 2.0
 
@@ -471,13 +444,25 @@ def check_step_slab(
                 related_coords=[sleeve.center, step.start, step.end],
             ))
 
+    if recess_polygons:
+        for recess in recess_polygons:
+            if point_in_polygon(sleeve.center, recess.vertices):
+                results.append(CheckResult(
+                    check_id=7,
+                    check_name="段差近接",
+                    severity="NG",
+                    sleeve=sleeve,
+                    message="床ヌスミ内にスリーブがあり、残コンクリート厚不足のおそれ",
+                    related_coords=[sleeve.center, *recess.vertices],
+                ))
+
     if not results:
         results.append(CheckResult(
             check_id=7,
             check_name="段差近接",
             severity="OK",
             sleeve=sleeve,
-            message="段差線との干渉なし",
+            message="段差線・床ヌスミとの干渉なし",
         ))
 
     return results
@@ -1185,13 +1170,13 @@ def run_all_checks(
         # #8 is now a global check (check_base_level), not per-sleeve
         results.extend(check_sleeve_number(sleeve))        # #14
         results.extend(check_horizontal_fl_notation(sleeve))  # #15
-        results.extend(check_step_slab(sleeve, floor_2f.step_lines))  # #7
+        results.extend(check_step_slab(sleeve, floor_2f.step_lines, floor_2f.recess_polygons))  # #7
 
         if lower_walls:
             results.extend(check_lower_wall(sleeve, lower_walls, wall_thickness))  # #6
 
     # --- Global level check ---
-    results.extend(check_base_level(floor_2f.slab_labels, floor_2f.has_base_level_def))  # #8
+    results.extend(check_base_level(floor_2f.sleeves))  # #8 — horizontal sleeves only
 
     # --- Global dim checks ---
     results.extend(check_dim_sum(floor_2f.dim_lines, floor_2f.grid_lines))   # #4

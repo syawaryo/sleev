@@ -2239,18 +2239,32 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         )
 
     if stair_centers:
-        # 外壁 is ALWAYS preserved — stair rooms sit directly under the
-        # top outer wall on this floor, so a naive exclusion disc erases
-        # the building perimeter. Only interior walls fall into the filter.
+        # Two classes of walls are ALWAYS preserved around stairs:
+        # 1. Explicit 外壁 (wall_type / layer). Stair cores sit directly
+        #    under the top outer wall so a naive disc erases part of it.
+        # 2. Perimeter centerlines. 壁心 layers don't carry an "外壁" tag
+        #    yet span the building edge — protect any wall whose midpoint
+        #    sits within 1.5 m of the building bbox boundary.
+        _PERIMETER_BAND = 1500.0
         def _is_outer_wall(w: WallLine) -> bool:
             return w.wall_type == "外壁" or "外壁" in w.layer
+        def _is_perimeter(sx: float, sy: float, ex: float, ey: float) -> bool:
+            mx, my = (sx + ex) / 2.0, (sy + ey) / 2.0
+            return (
+                mx - BLDG_X_MIN <= _PERIMETER_BAND
+                or BLDG_X_MAX - mx <= _PERIMETER_BAND
+                or my - BLDG_Y_MIN <= _PERIMETER_BAND
+                or BLDG_Y_MAX - my <= _PERIMETER_BAND
+            )
         wall_lines = [
             w for w in wall_lines
             if _is_outer_wall(w)
+            or _is_perimeter(w.start[0], w.start[1], w.end[0], w.end[1])
             or _segment_outside_stairs(w.start[0], w.start[1], w.end[0], w.end[1])
         ]
-        column_lines = [c for c in column_lines
-                        if _segment_outside_stairs(c.start[0], c.start[1], c.end[0], c.end[1])]
+        # Columns are NOT clipped by the stair exclusion — every column /
+        # brace / joint / 根巻 element must render even when it sits in a
+        # stair core. Reviewer explicitly asked for every column shape.
         step_lines = [s for s in step_lines
                       if _segment_outside_stairs(s.start[0], s.start[1], s.end[0], s.end[1])]
         slab_outlines = [o for o in slab_outlines
