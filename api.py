@@ -60,8 +60,8 @@ IFC_DIR = Path("ifc_output")
 _FLOOR_ID_MAP: dict[str, str] = {}
 # Reverse map: id -> stem
 _ID_TO_STEM: dict[str, str] = {}
-# floor_id -> (mep_ifc_path, architecture_ifc_path_or_None)
-_IFC_SOURCES: dict[str, tuple[Path, Path | None]] = {}
+# floor_id -> list of IFC paths (auto-classified by parser)
+_IFC_SOURCES: dict[str, list[Path]] = {}
 
 _RE_FLOOR = re.compile(r"(B?\d+)階")
 
@@ -83,17 +83,16 @@ if DXF_DIR.exists():
         _FLOOR_ID_MAP[_s] = _fid
         _ID_TO_STEM[_fid] = _s
 
-# Pre-populate IFC sources by scanning IFC_DIR/<floor_id>/sleeve.ifc on startup
+# Pre-populate IFC sources by collecting every *.ifc in each IFC_DIR/<floor_id>/.
 if IFC_DIR.exists():
     for _sub in IFC_DIR.iterdir():
         if not _sub.is_dir():
             continue
-        _sleeve = _sub / "sleeve.ifc"
-        if not _sleeve.exists():
+        _ifcs = sorted(_sub.glob("*.ifc"))
+        if not _ifcs:
             continue
-        _struct = _sub / "structure.ifc"
         _fid = _sub.name
-        _IFC_SOURCES[_fid] = (_sleeve, _struct if _struct.exists() else None)
+        _IFC_SOURCES[_fid] = _ifcs
         _ID_TO_STEM.setdefault(_fid, _fid)
         _FLOOR_ID_MAP.setdefault(_fid, _fid)
 
@@ -136,8 +135,8 @@ def _resolve_floor_data(floor_id: str | None, path: str | None) -> FloorData:
         cache_key = f"ifc::{floor_id}"
         if cache_key in _parse_cache:
             return _parse_cache[cache_key]
-        mep_p, arch_p = _IFC_SOURCES[floor_id]
-        fd = parse_ifc(mep_p, arch_p)
+        paths = _IFC_SOURCES[floor_id]
+        fd = parse_ifc(paths)
         _parse_cache[cache_key] = fd
         return fd
     # DXF path (existing behaviour)
@@ -353,11 +352,11 @@ def list_floors() -> list[dict]:
                 "source": "dxf",
             })
 
-    for fid, (sleeve_p, _struct_p) in _IFC_SOURCES.items():
+    for fid, paths in _IFC_SOURCES.items():
         floors.append({
             "id": fid,
             "name": _ID_TO_STEM.get(fid, fid),
-            "path": str(sleeve_p).replace("\\", "/"),
+            "path": str(paths[0]).replace("\\", "/") if paths else "",
             "source": "ifc",
         })
 
@@ -436,17 +435,20 @@ async def upload_dwg(file: UploadFile = File(...), label: str = Form("")):
 
 @app.post("/api/upload_ifc")
 async def upload_ifc(
-    mep_ifc: UploadFile = File(...),
-    architecture_ifc: UploadFile = File(...),
+    files: list[UploadFile] = File(...),
     label: str = Form(""),
 ):
-    """Upload a MEP IFC (sleeves) and architecture IFC (structure). Both required."""
-    if not mep_ifc.filename or not mep_ifc.filename.lower().endswith(".ifc"):
-        raise HTTPException(status_code=400, detail="MEP IFC file (.ifc) required")
-    if not architecture_ifc.filename or not architecture_ifc.filename.lower().endswith(".ifc"):
-        raise HTTPException(status_code=400, detail="Architecture IFC file (.ifc) required")
+    """Upload one or more IFC files. The parser figures out which provides
+    sleeves / grids / architecture — the UI doesn't need to pre-classify.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one IFC file is required")
+    for f in files:
+        if not f.filename or not f.filename.lower().endswith(".ifc"):
+            raise HTTPException(status_code=400, detail=f"Non-IFC file rejected: {f.filename}")
 
-    stem = Path(mep_ifc.filename).stem
+    # Derive a floor id from the first filename (stable enough for demos).
+    stem = Path(files[0].filename or "ifc").stem
     base_id = _stem_to_floor_id(stem)
     # Disambiguate from DXF namespace so the same stem doesn't clobber an existing DXF
     floor_id = f"{base_id}-ifc"
@@ -455,15 +457,21 @@ async def upload_ifc(
     folder = IFC_DIR / floor_id
     folder.mkdir(exist_ok=True)
 
-    # Write using the legacy filenames so the on-disk layout stays stable with
-    # existing datasets; the public API surface uses the new names.
-    mep_path = folder / "sleeve.ifc"
-    mep_path.write_bytes(await mep_ifc.read())
+    # Clear any previous IFCs in this folder so re-upload doesn't leave stale ones.
+    for old in folder.glob("*.ifc"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
-    arch_path = folder / "structure.ifc"
-    arch_path.write_bytes(await architecture_ifc.read())
+    saved: list[Path] = []
+    for f in files:
+        name = Path(f.filename or "file.ifc").name
+        dest = folder / name
+        dest.write_bytes(await f.read())
+        saved.append(dest)
 
-    _IFC_SOURCES[floor_id] = (mep_path, arch_path)
+    _IFC_SOURCES[floor_id] = saved
     _ID_TO_STEM[floor_id] = stem
     _parse_cache.pop(f"ifc::{floor_id}", None)
 
@@ -471,9 +479,9 @@ async def upload_ifc(
         "id": floor_id,
         "name": stem,
         "label": label or stem,
-        "path": str(mep_path).replace("\\", "/"),
+        "path": str(saved[0]).replace("\\", "/"),
         "source": "ifc",
-        "has_architecture": True,
+        "file_count": len(saved),
     }
 
 

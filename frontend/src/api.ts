@@ -30,13 +30,12 @@ export async function uploadDwg(
 }
 
 export async function uploadIfc(
-  mepIfc: File,
-  architectureIfc: File,
+  files: File[],
   label: string,
-): Promise<{id: string; name: string; label: string; path: string; source: string; has_architecture: boolean}> {
+): Promise<{id: string; name: string; label: string; path: string; source: string; file_count: number}> {
+  if (files.length === 0) throw new Error("At least one IFC file is required");
   const form = new FormData();
-  form.append("mep_ifc", mepIfc);
-  form.append("architecture_ifc", architectureIfc);
+  for (const f of files) form.append("files", f);
   form.append("label", label);
   const res = await axios.post(`${BASE}/upload_ifc`, form);
   return res.data;

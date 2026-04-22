@@ -59,8 +59,7 @@ function App() {
   const toggleSleeveFilter = (key: keyof typeof sleeveFilters) =>
     setSleeveFilters((p) => ({ ...p, [key]: !p[key] }));
   const [ifcModalOpen, setIfcModalOpen] = useState(false);
-  const [ifcMepFile, setIfcMepFile] = useState<File | null>(null);
-  const [ifcArchFile, setIfcArchFile] = useState<File | null>(null);
+  const [ifcFiles, setIfcFiles] = useState<File[]>([]);
   const [dwgConverting, setDwgConverting] = useState(false);
   const [dwgError, setDwgError] = useState<string | null>(null);
   const [drawingModalOpen, setDrawingModalOpen] = useState(false);
@@ -119,10 +118,10 @@ function App() {
   }, []);
 
   const handleIfcSubmit = async () => {
-    if (!ifcMepFile || !ifcArchFile) return;
+    if (ifcFiles.length === 0) return;
     setLoading(true);
     try {
-      const res = await uploadIfc(ifcMepFile, ifcArchFile, "");
+      const res = await uploadIfc(ifcFiles, "");
       setFloors((prev) => {
         const entry: FloorEntry = { id: res.id, label: res.name, source: "ifc", data: null, results: [] };
         const exists = prev.findIndex((f) => f.id === res.id);
@@ -134,8 +133,7 @@ function App() {
         return [...prev, entry];
       });
       setIfcModalOpen(false);
-      setIfcMepFile(null);
-      setIfcArchFile(null);
+      setIfcFiles([]);
     } catch (e) {
       console.error(e);
     }
@@ -393,42 +391,35 @@ function App() {
           >
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>IFCをアップロード</div>
             <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 18 }}>
-              建築IFC（躯体・壁・スラブ・柱）と 設備IFC（スリーブ・配管）を両方指定してください。建築と設備の干渉をチェックするため両方必須です。
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>建築IFC <span style={{ color: "#dc2626" }}>*</span></div>
-              <input type="file" accept=".ifc"
-                onChange={(e) => setIfcArchFile(e.target.files?.[0] ?? null)}
-                style={{ fontSize: 12, width: "100%" }} />
-              {ifcArchFile && (
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{ifcArchFile.name}</div>
-              )}
+              IFCファイルを1つ以上選択してください（複数選択可）。躯体・設備の区別は不要で、パーサが自動で使い分けます。
             </div>
 
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>設備IFC <span style={{ color: "#dc2626" }}>*</span></div>
-              <input type="file" accept=".ifc"
-                onChange={(e) => setIfcMepFile(e.target.files?.[0] ?? null)}
+              <input type="file" accept=".ifc" multiple
+                onChange={(e) => setIfcFiles(Array.from(e.target.files || []))}
                 style={{ fontSize: 12, width: "100%" }} />
-              {ifcMepFile && (
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{ifcMepFile.name}</div>
+              {ifcFiles.length > 0 && (
+                <ul style={{ fontSize: 11, color: "#6b7280", marginTop: 8, paddingLeft: 16, listStyle: "disc" }}>
+                  {ifcFiles.map((f, i) => (
+                    <li key={i}>{f.name}</li>
+                  ))}
+                </ul>
               )}
             </div>
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button
-                onClick={() => { if (!loading) { setIfcModalOpen(false); setIfcMepFile(null); setIfcArchFile(null); } }}
+                onClick={() => { if (!loading) { setIfcModalOpen(false); setIfcFiles([]); } }}
                 disabled={loading}
                 style={{ padding: "6px 16px", fontSize: 12, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}
               >キャンセル</button>
               <button
                 onClick={handleIfcSubmit}
-                disabled={!ifcMepFile || !ifcArchFile || loading}
+                disabled={ifcFiles.length === 0 || loading}
                 style={{
                   padding: "6px 16px", fontSize: 12, border: "none", borderRadius: 6,
-                  background: (!ifcMepFile || !ifcArchFile || loading) ? "#d1d5db" : "#ff4b4b",
-                  color: "#fff", cursor: (!ifcMepFile || !ifcArchFile || loading) ? "default" : "pointer",
+                  background: (ifcFiles.length === 0 || loading) ? "#d1d5db" : "#ff4b4b",
+                  color: "#fff", cursor: (ifcFiles.length === 0 || loading) ? "default" : "pointer",
                   fontWeight: 500,
                 }}
               >{loading ? "アップロード中..." : "登録"}</button>

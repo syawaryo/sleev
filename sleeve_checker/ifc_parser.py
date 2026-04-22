@@ -368,30 +368,42 @@ def _synthesize_grid_dims(sleeves: list[Sleeve], grids: list[GridLine]) -> list[
 # Public entrypoint
 # ---------------------------------------------------------------------------
 
-def parse_ifc(mep_path: str | Path, architecture_path: str | Path | None = None) -> FloorData:
-    """Parse a MEP IFC (sleeves + grids) and an architecture IFC (structure) into FloorData.
+def parse_ifc(ifc_paths: str | Path | list[str | Path]) -> FloorData:
+    """Parse one or more IFC files into FloorData.
 
-    Phase 1: only Sleeves and GridLines are populated from the MEP IFC.
-    Phase 2 will mine walls / slabs / columns from the architecture IFC.
+    Accepts either a single path (backward compatibility) or a list. The first
+    file that yields non-empty grids / sleeves wins; later files can
+    contribute architecture entities (Phase 2 hook).
     """
-    mp = Path(mep_path)
-    if not mp.exists():
-        raise FileNotFoundError(f"MEP IFC not found: {mp}")
+    if isinstance(ifc_paths, (str, Path)):
+        path_list: list[Path] = [Path(ifc_paths)]
+    else:
+        path_list = [Path(p) for p in ifc_paths]
 
-    mep_f = ifcopenshell.open(str(mp))
+    if not path_list:
+        raise ValueError("At least one IFC path is required")
 
-    grid_lines = _extract_grids(mep_f)
-    sleeves = _extract_sleeves(mep_f)
+    opened: list = []
+    for p in path_list:
+        if not p.exists():
+            raise FileNotFoundError(f"IFC not found: {p}")
+        opened.append(ifcopenshell.open(str(p)))
+
+    grid_lines: list = []
+    sleeves: list = []
+    has_base_level_def = False
+    for f in opened:
+        if not grid_lines:
+            grid_lines = _extract_grids(f)
+        if not sleeves:
+            sleeves = _extract_sleeves(f)
+        if len(f.by_type("IfcBuildingStorey")) > 0:
+            has_base_level_def = True
+
     # Drop sleeves placed in enlarged-detail areas (outside 1.5× grid extent).
     # These are drafting duplicates of real sleeves rendered in the sheet's
     # corner mini-maps; filtering them brings IFC counts in line with DXF.
     sleeves = [s for s in sleeves if _within_building_area(s.center, grid_lines)]
-
-    # Phase 2 hook — architecture IFC. Intentionally left empty for now.
-    if architecture_path is not None:
-        arch_p = Path(architecture_path)
-        if arch_p.exists():
-            _ = ifcopenshell.open(str(arch_p))  # loaded, not yet mined
 
     # Synthesis: fill notation-side fields whose semantic truth the IFC
     # already carries (geometry, grid placement). P-N numbers are NOT
@@ -399,10 +411,6 @@ def parse_ifc(mep_path: str | Path, architecture_path: str | Path | None = None)
     # labels — leaving pn_number=None lets check #14 report the missing
     # information honestly instead of auto-passing on fabricated data.
     dim_lines = _synthesize_grid_dims(sleeves, grid_lines)
-
-    # IFCBuildingStorey carries Elevation natively, so the "base level is
-    # defined" condition (check #8 1st clause) is intrinsically true for IFC.
-    has_base_level_def = len(mep_f.by_type("IfcBuildingStorey")) > 0
 
     return FloorData(
         sleeves=sleeves,
