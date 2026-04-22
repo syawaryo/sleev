@@ -43,6 +43,27 @@ def segments_intersect(
     return False
 
 
+def point_in_polygon(
+    point: tuple[float, float],
+    vertices: list[tuple[float, float]],
+) -> bool:
+    """Ray-casting point-in-polygon test. Vertices are taken in order; the
+    polygon is treated as closed (last vertex connects back to the first)."""
+    n = len(vertices)
+    if n < 3:
+        return False
+    px, py = point
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = vertices[i]
+        xj, yj = vertices[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
 def ray_blocked_by_steps(
     origin: tuple[float, float],
     target: tuple[float, float],
