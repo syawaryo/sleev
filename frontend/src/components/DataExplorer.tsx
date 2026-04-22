@@ -429,6 +429,18 @@ export default function DataExplorer({ floorData, onNavigate }: Props) {
                       </span>
                       <span style={{
                         color: "#9ca3af",
+                        fontSize: 10.5,
+                        letterSpacing: 0.1,
+                        width: 180,
+                        flexShrink: 0,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}>
+                        {r.rawLayer || ""}
+                      </span>
+                      <span style={{
+                        color: "#9ca3af",
                         flex: 1,
                         whiteSpace: "nowrap",
                         overflow: "hidden",
