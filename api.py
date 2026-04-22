@@ -60,7 +60,7 @@ IFC_DIR = Path("ifc_output")
 _FLOOR_ID_MAP: dict[str, str] = {}
 # Reverse map: id -> stem
 _ID_TO_STEM: dict[str, str] = {}
-# floor_id -> (sleeve_ifc_path, structure_ifc_path_or_None)
+# floor_id -> (mep_ifc_path, architecture_ifc_path_or_None)
 _IFC_SOURCES: dict[str, tuple[Path, Path | None]] = {}
 
 _RE_FLOOR = re.compile(r"(B?\d+)階")
@@ -136,8 +136,8 @@ def _resolve_floor_data(floor_id: str | None, path: str | None) -> FloorData:
         cache_key = f"ifc::{floor_id}"
         if cache_key in _parse_cache:
             return _parse_cache[cache_key]
-        sleeve_p, struct_p = _IFC_SOURCES[floor_id]
-        fd = parse_ifc(sleeve_p, struct_p)
+        mep_p, arch_p = _IFC_SOURCES[floor_id]
+        fd = parse_ifc(mep_p, arch_p)
         _parse_cache[cache_key] = fd
         return fd
     # DXF path (existing behaviour)
@@ -436,15 +436,17 @@ async def upload_dwg(file: UploadFile = File(...), label: str = Form("")):
 
 @app.post("/api/upload_ifc")
 async def upload_ifc(
-    sleeve_ifc: UploadFile = File(...),
-    structure_ifc: UploadFile | None = File(None),
+    mep_ifc: UploadFile = File(...),
+    architecture_ifc: UploadFile = File(...),
     label: str = Form(""),
 ):
-    """Upload a sleeve IFC (and optional structural IFC) and register as a floor."""
-    if not sleeve_ifc.filename or not sleeve_ifc.filename.lower().endswith(".ifc"):
-        raise HTTPException(status_code=400, detail="Sleeve IFC file (.ifc) required")
+    """Upload a MEP IFC (sleeves) and architecture IFC (structure). Both required."""
+    if not mep_ifc.filename or not mep_ifc.filename.lower().endswith(".ifc"):
+        raise HTTPException(status_code=400, detail="MEP IFC file (.ifc) required")
+    if not architecture_ifc.filename or not architecture_ifc.filename.lower().endswith(".ifc"):
+        raise HTTPException(status_code=400, detail="Architecture IFC file (.ifc) required")
 
-    stem = Path(sleeve_ifc.filename).stem
+    stem = Path(mep_ifc.filename).stem
     base_id = _stem_to_floor_id(stem)
     # Disambiguate from DXF namespace so the same stem doesn't clobber an existing DXF
     floor_id = f"{base_id}-ifc"
@@ -453,17 +455,15 @@ async def upload_ifc(
     folder = IFC_DIR / floor_id
     folder.mkdir(exist_ok=True)
 
-    sleeve_path = folder / "sleeve.ifc"
-    sleeve_path.write_bytes(await sleeve_ifc.read())
+    # Write using the legacy filenames so the on-disk layout stays stable with
+    # existing datasets; the public API surface uses the new names.
+    mep_path = folder / "sleeve.ifc"
+    mep_path.write_bytes(await mep_ifc.read())
 
-    structure_path: Path | None = None
-    if structure_ifc is not None and structure_ifc.filename:
-        if not structure_ifc.filename.lower().endswith(".ifc"):
-            raise HTTPException(status_code=400, detail="Structure IFC must be .ifc")
-        structure_path = folder / "structure.ifc"
-        structure_path.write_bytes(await structure_ifc.read())
+    arch_path = folder / "structure.ifc"
+    arch_path.write_bytes(await architecture_ifc.read())
 
-    _IFC_SOURCES[floor_id] = (sleeve_path, structure_path)
+    _IFC_SOURCES[floor_id] = (mep_path, arch_path)
     _ID_TO_STEM[floor_id] = stem
     _parse_cache.pop(f"ifc::{floor_id}", None)
 
@@ -471,9 +471,9 @@ async def upload_ifc(
         "id": floor_id,
         "name": stem,
         "label": label or stem,
-        "path": str(sleeve_path).replace("\\", "/"),
+        "path": str(mep_path).replace("\\", "/"),
         "source": "ifc",
-        "has_structure": structure_path is not None,
+        "has_architecture": True,
     }
 
 

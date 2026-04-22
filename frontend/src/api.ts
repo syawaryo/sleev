@@ -30,13 +30,13 @@ export async function uploadDwg(
 }
 
 export async function uploadIfc(
-  sleeveIfc: File,
-  structureIfc: File | null,
+  mepIfc: File,
+  architectureIfc: File,
   label: string,
-): Promise<{id: string; name: string; label: string; path: string; source: string; has_structure: boolean}> {
+): Promise<{id: string; name: string; label: string; path: string; source: string; has_architecture: boolean}> {
   const form = new FormData();
-  form.append("sleeve_ifc", sleeveIfc);
-  if (structureIfc) form.append("structure_ifc", structureIfc);
+  form.append("mep_ifc", mepIfc);
+  form.append("architecture_ifc", architectureIfc);
   form.append("label", label);
   const res = await axios.post(`${BASE}/upload_ifc`, form);
   return res.data;

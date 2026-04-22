@@ -1,6 +1,10 @@
 import { useMemo, useState, useRef, useCallback, useEffect, memo } from "react";
 import type { FloorData, Sleeve, CheckResult } from "../types";
 
+type LayerKey = "grid" | "wall" | "outerWall" | "step" | "recess" | "column" | "sleeve" | "dim" | "lowerWall" | "slabLevel" | "raw" | "room";
+type DisciplineKey = "衛生" | "空調" | "電気" | "その他";
+type ColorMode = "severity" | "fl" | "discipline";
+
 interface Props {
   floorData: FloorData;
   lowerFloorData: FloorData | null;
@@ -8,14 +12,23 @@ interface Props {
   onSleeveHover: (sleeve: Sleeve | null) => void;
   onSleeveClick: (sleeve: Sleeve | null) => void;
   selectedSleeveId: string | null;
-  layers: { grid: boolean; wall: boolean; outerWall: boolean; step: boolean; recess: boolean; column: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean; raw: boolean; room: boolean };
-  sleeveFilters: { 衛生: boolean; 空調: boolean; 電気: boolean; その他: boolean };
-  colorMode: "severity" | "fl" | "discipline";
+  layers: Record<LayerKey, boolean>;
+  sleeveFilters: Record<DisciplineKey, boolean>;
+  colorMode: ColorMode;
   pdfOverlayUrl?: string | null;
   pdfOverlayOpacity?: number;
   navigateTarget?: [number, number] | null;
   onNavigated?: () => void;
   highlightCoords?: [number, number][];
+  // Toolbar callbacks (moved out of the App header)
+  onToggleLayer: (key: LayerKey) => void;
+  onToggleSleeveFilter: (key: DisciplineKey) => void;
+  onColorModeChange: (mode: ColorMode) => void;
+  sleeveCounts: Record<DisciplineKey, number>;
+  showLowerWallToggle: boolean;
+  onPdfFilesSelected: (files: FileList | null) => void;
+  onPdfClear: () => void;
+  onPdfOpacityChange: (v: number) => void;
 }
 
 const SEVERITY_COLORS: Record<string, { stroke: string; fill: string }> = {
@@ -466,8 +479,11 @@ function DrawingViewInner({
   floorData, lowerFloorData, results, onSleeveHover, onSleeveClick,
   selectedSleeveId, layers, sleeveFilters, colorMode, navigateTarget, onNavigated, highlightCoords,
   pdfOverlayUrl, pdfOverlayOpacity = 0.4,
+  onToggleLayer, onToggleSleeveFilter, onColorModeChange, sleeveCounts,
+  showLowerWallToggle, onPdfFilesSelected, onPdfClear, onPdfOpacityChange,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
   const [vb, setVb] = useState<ViewBox>(INITIAL_VB);
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef<{ x: number; y: number; vb: ViewBox } | null>(null);
@@ -617,18 +633,130 @@ function DrawingViewInner({
 
   const viewBox = `${vb.x} ${vb.y} ${vb.w} ${vb.h}`;
 
+  const LAYER_ITEMS: [LayerKey, string][] = [
+    ["grid", "通り芯"],
+    ["wall", "壁"],
+    ["outerWall", "外壁"],
+    ["step", "スラブ段差"],
+    ["recess", "床ヌスミ"],
+    ["column", "柱・仕上"],
+    ["dim", "寸法"],
+    ["slabLevel", "スラブレベル"],
+    ["room", "部屋名"],
+    ["sleeve", "スリーブ"],
+  ];
+  const discColor = (d: DisciplineKey) =>
+    d === "衛生" ? "#3b82f6" : d === "空調" ? "#f59e0b" : d === "電気" ? "#ef4444" : "#6b7280";
+
   return (
-    <svg
-      ref={svgRef}
-      viewBox={viewBox}
-      style={{ width: "100%", height: "100%", background: "#fdfdfe", cursor: isPanning ? "grabbing" : "grab" }}
-      xmlns="http://www.w3.org/2000/svg"
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      onDoubleClick={handleDoubleClick}
-    >
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#fdfdfe" }}>
+      {/* Toolbar */}
+      <div className="no-print" style={{
+        display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6,
+        padding: "6px 12px", background: "#fff",
+        borderBottom: "1px solid #f3f4f6",
+      }}>
+        <span style={{ color: "#9ca3af", fontSize: 10 }}>レイヤー</span>
+        {LAYER_ITEMS.map(([key, label]) => {
+          const on = layers[key];
+          return (
+            <button key={key} onClick={() => onToggleLayer(key)}
+              style={{
+                padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
+                border: `1px solid ${on ? "#9ca3af" : "#e5e7eb"}`,
+                background: on ? "#f3f4f6" : "#fff",
+                color: on ? "#374151" : "#d1d5db",
+              }}>{label}</button>
+          );
+        })}
+        {showLowerWallToggle && (
+          <button onClick={() => onToggleLayer("lowerWall")}
+            style={{
+              padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
+              border: `1px solid ${layers.lowerWall ? "#9ca3af" : "#e5e7eb"}`,
+              background: layers.lowerWall ? "#f3f4f6" : "#fff",
+              color: layers.lowerWall ? "#374151" : "#d1d5db",
+            }}>1F壁</button>
+        )}
+
+        {layers.sleeve && (
+          <>
+            <span style={{ color: "#d1d5db", margin: "0 2px" }}>›</span>
+            {(["衛生", "空調", "電気", "その他"] as const).map((disc) => {
+              const on = sleeveFilters[disc];
+              const cnt = sleeveCounts[disc];
+              const color = discColor(disc);
+              return (
+                <button key={disc} onClick={() => onToggleSleeveFilter(disc)} disabled={cnt === 0}
+                  style={{
+                    padding: "2px 8px", borderRadius: 4, cursor: cnt === 0 ? "default" : "pointer", fontSize: 10,
+                    border: `1px solid ${on && cnt > 0 ? color : "#e5e7eb"}`,
+                    background: on && cnt > 0 ? `${color}15` : "#fff",
+                    color: on && cnt > 0 ? color : "#d1d5db",
+                    opacity: cnt === 0 ? 0.4 : 1,
+                  }}>
+                  {disc} {cnt > 0 && <span style={{ opacity: 0.7 }}>({cnt})</span>}
+                </button>
+              );
+            })}
+          </>
+        )}
+
+        <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
+        <span style={{ color: "#9ca3af", fontSize: 10 }}>色分け</span>
+        <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 5, padding: 2, gap: 1 }}>
+          {([["severity", "判定"], ["fl", "FL高さ"], ["discipline", "設備"]] as const).map(([mode, label]) => (
+            <button key={mode} onClick={() => onColorModeChange(mode)}
+              style={{
+                padding: "2px 10px", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 10,
+                fontWeight: colorMode === mode ? 500 : 400,
+                background: colorMode === mode ? "#fff" : "transparent",
+                color: colorMode === mode ? "#111827" : "#9ca3af",
+                boxShadow: colorMode === mode ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+              }}>{label}</button>
+          ))}
+        </div>
+
+        <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
+        <span style={{ color: "#9ca3af", fontSize: 10 }}>PDF重ね</span>
+        <input ref={pdfInputRef} type="file" accept=".pdf" style={{ display: "none" }}
+          onChange={(e) => onPdfFilesSelected(e.target.files)} />
+        <button onClick={() => pdfInputRef.current?.click()}
+          style={{
+            padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
+            border: "1px solid #d1d5db", background: pdfOverlayUrl ? "#eff6ff" : "#fff",
+            color: pdfOverlayUrl ? "#1d4ed8" : "#374151",
+          }}>{pdfOverlayUrl ? "PDF読込済" : "PDF選択"}</button>
+        {pdfOverlayUrl && (
+          <>
+            <input type="range" min={0} max={100}
+              value={Math.round(pdfOverlayOpacity * 100)}
+              onChange={(e) => onPdfOpacityChange(Number(e.target.value) / 100)}
+              style={{ width: 80 }} />
+            <span style={{ fontSize: 10, color: "#6b7280", minWidth: 28 }}>
+              {Math.round(pdfOverlayOpacity * 100)}%
+            </span>
+            <button onClick={onPdfClear}
+              style={{
+                padding: "2px 6px", borderRadius: 4, cursor: "pointer", fontSize: 10,
+                border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280",
+              }}>×</button>
+          </>
+        )}
+      </div>
+
+      {/* SVG */}
+      <svg
+        ref={svgRef}
+        viewBox={viewBox}
+        style={{ flex: 1, width: "100%", background: "#fdfdfe", cursor: isPanning ? "grabbing" : "grab" }}
+        xmlns="http://www.w3.org/2000/svg"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
+      >
       <g transform="scale(1,-1)">
         {/* PDF overlay (optional) — drawn behind everything.
             Nested scale(1,-1) cancels the outer Y-flip so the PDF
@@ -668,7 +796,8 @@ function DrawingViewInner({
         />
         <HighlightLayer coords={highlightCoords || []} />
       </g>
-    </svg>
+      </svg>
+    </div>
   );
 }
 

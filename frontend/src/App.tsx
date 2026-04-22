@@ -58,17 +58,15 @@ function App() {
   });
   const toggleSleeveFilter = (key: keyof typeof sleeveFilters) =>
     setSleeveFilters((p) => ({ ...p, [key]: !p[key] }));
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const dwgInputRef = useRef<HTMLInputElement>(null);
   const [ifcModalOpen, setIfcModalOpen] = useState(false);
-  const [ifcSleeveFile, setIfcSleeveFile] = useState<File | null>(null);
-  const [ifcStructureFile, setIfcStructureFile] = useState<File | null>(null);
+  const [ifcMepFile, setIfcMepFile] = useState<File | null>(null);
+  const [ifcArchFile, setIfcArchFile] = useState<File | null>(null);
   const [dwgConverting, setDwgConverting] = useState(false);
   const [dwgError, setDwgError] = useState<string | null>(null);
+  const [drawingModalOpen, setDrawingModalOpen] = useState(false);
+  const [drawingFile, setDrawingFile] = useState<File | null>(null);
   const [pdfOverlayUrl, setPdfOverlayUrl] = useState<string | null>(null);
   const [pdfOverlayOpacity, setPdfOverlayOpacity] = useState(0.4);
-  const pdfInputRef = useRef<HTMLInputElement>(null);
-
   const handleUploadPdf = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     try {
@@ -77,7 +75,6 @@ function App() {
     } catch (e) {
       console.error("PDF overlay failed:", e);
     }
-    if (pdfInputRef.current) pdfInputRef.current.value = "";
   };
 
   const toggleLayer = (key: keyof typeof layers) =>
@@ -121,64 +118,11 @@ function App() {
     }).catch(() => {});
   }, []);
 
-  const handleUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setLoading(true);
-    try {
-      for (const file of Array.from(files)) {
-        const res = await uploadDxf(file, "");
-        setFloors((prev) => {
-          const entry: FloorEntry = { id: res.id, label: res.name, source: "dxf", data: null, results: [] };
-          const exists = prev.findIndex((f) => f.id === res.id);
-          if (exists >= 0) {
-            const next = [...prev];
-            next[exists] = entry;
-            return next;
-          }
-          return [...prev, entry];
-        });
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    setLoading(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleUploadDwg = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setDwgError(null);
-    setDwgConverting(true);
-    setLoading(true);
-    try {
-      for (const file of Array.from(files)) {
-        const res = await uploadDwg(file, "");
-        setFloors((prev) => {
-          const entry: FloorEntry = { id: res.id, label: res.name, source: "dwg", data: null, results: [] };
-          const exists = prev.findIndex((f) => f.id === res.id);
-          if (exists >= 0) {
-            const next = [...prev];
-            next[exists] = entry;
-            return next;
-          }
-          return [...prev, entry];
-        });
-      }
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail ?? e?.message ?? "DWG変換に失敗しました";
-      setDwgError(String(detail));
-      console.error(e);
-    }
-    setDwgConverting(false);
-    setLoading(false);
-    if (dwgInputRef.current) dwgInputRef.current.value = "";
-  };
-
   const handleIfcSubmit = async () => {
-    if (!ifcSleeveFile) return;
+    if (!ifcMepFile || !ifcArchFile) return;
     setLoading(true);
     try {
-      const res = await uploadIfc(ifcSleeveFile, ifcStructureFile, "");
+      const res = await uploadIfc(ifcMepFile, ifcArchFile, "");
       setFloors((prev) => {
         const entry: FloorEntry = { id: res.id, label: res.name, source: "ifc", data: null, results: [] };
         const exists = prev.findIndex((f) => f.id === res.id);
@@ -190,9 +134,47 @@ function App() {
         return [...prev, entry];
       });
       setIfcModalOpen(false);
-      setIfcSleeveFile(null);
-      setIfcStructureFile(null);
+      setIfcMepFile(null);
+      setIfcArchFile(null);
     } catch (e) {
+      console.error(e);
+    }
+    setLoading(false);
+  };
+
+  const handleDrawingSubmit = async () => {
+    if (!drawingFile) return;
+    const ext = drawingFile.name.split(".").pop()?.toLowerCase();
+    setDwgError(null);
+    setLoading(true);
+    try {
+      let res: { id: string; name: string };
+      if (ext === "dwg") {
+        setDwgConverting(true);
+        res = await uploadDwg(drawingFile, "");
+        setDwgConverting(false);
+      } else if (ext === "dxf") {
+        res = await uploadDxf(drawingFile, "");
+      } else {
+        throw new Error("対応形式は .dxf または .dwg です");
+      }
+      const source: "dxf" | "dwg" = ext === "dwg" ? "dwg" : "dxf";
+      setFloors((prev) => {
+        const entry: FloorEntry = { id: res.id, label: res.name, source, data: null, results: [] };
+        const exists = prev.findIndex((f) => f.id === res.id);
+        if (exists >= 0) {
+          const next = [...prev];
+          next[exists] = entry;
+          return next;
+        }
+        return [...prev, entry];
+      });
+      setDrawingModalOpen(false);
+      setDrawingFile(null);
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail ?? e?.message ?? "アップロードに失敗しました";
+      setDwgError(String(detail));
+      setDwgConverting(false);
       console.error(e);
     }
     setLoading(false);
@@ -282,13 +264,7 @@ function App() {
 
       </div>
 
-      {/* Hidden file inputs (always rendered) */}
-      <input ref={fileInputRef} type="file" accept=".dxf" multiple style={{ display: "none" }}
-        onChange={(e) => handleUpload(e.target.files)} />
-      <input ref={dwgInputRef} type="file" accept=".dwg" multiple style={{ display: "none" }}
-        onChange={(e) => handleUploadDwg(e.target.files)} />
-
-      {/* Row 2: Floor tabs + controls */}
+      {/* Row 2: Floor tabs + upload buttons */}
       <div className="no-print" style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "6px 20px", display: "flex", alignItems: "center", gap: 10 }}>
         {/* Floor segment */}
         {floors.length > 0 && (
@@ -323,170 +299,15 @@ function App() {
           </div>
         )}
 
-        <button onClick={() => fileInputRef.current?.click()} disabled={loading}
-          style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
-          + DXF追加
-        </button>
-        <button onClick={() => dwgInputRef.current?.click()} disabled={loading}
-          style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
-          {dwgConverting ? "DWG変換中..." : "+ DWG追加"}
+        <button onClick={() => setDrawingModalOpen(true)} disabled={loading}
+          style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}>
+          {dwgConverting ? "DWG変換中..." : "+ 図面を追加"}
         </button>
         <button onClick={() => setIfcModalOpen(true)} disabled={loading}
-          style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#9ca3af", cursor: "pointer" }}>
-          + IFC追加
+          style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}>
+          + IFCを追加
         </button>
 
-        {/* List mode filters */}
-        {viewMode === "list" && (
-          <div style={{ marginLeft: "auto", display: "flex", gap: 4, fontSize: 11 }}>
-            {([["all", "全て"], ["NG", "NG"], ["WARNING", "WARN"], ["OK", "OK"]] as const).map(([val, label]) => {
-              const isActive = filter === val;
-              const colors: Record<string, { border: string; color: string; bg: string }> = {
-                NG: { border: "#fecaca", color: "#dc2626", bg: "#fef2f2" },
-                WARNING: { border: "#fde68a", color: "#d97706", bg: "#fffbeb" },
-                OK: { border: "#bbf7d0", color: "#16a34a", bg: "#f0fdf4" },
-              };
-              const c = colors[val];
-              return (
-                <button key={val} onClick={() => setFilter(val)}
-                  style={{
-                    padding: "3px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11, border: "1px solid",
-                    borderColor: isActive ? (c?.border || "#d1d5db") : "#e5e7eb",
-                    background: isActive ? (c?.bg || "#f3f4f6") : "#fff",
-                    color: c?.color || "#111827",
-                    fontWeight: isActive ? 500 : 400,
-                  }}>{label}</button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Drawing mode layer controls */}
-        {viewMode === "drawing" && floorData && (
-          <>
-            <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
-            <span style={{ color: "#9ca3af", fontSize: 10 }}>レイヤー</span>
-            {([
-              ["grid", "通り芯"],
-              ["wall", "壁"],
-              ["outerWall", "外壁"],
-              ["step", "スラブ段差"],
-              ["recess", "床ヌスミ"],
-              ["column", "柱・仕上"],
-              ["dim", "寸法"],
-              ["slabLevel", "スラブレベル"],
-              ["room", "部屋名"],
-              ["sleeve", "スリーブ"],
-              ...(activeFloor.id === "2f" ? [["lowerWall", "1F壁"]] : []),
-            ] as string[][]).map(([key, label]) => {
-              const on = layers[key as keyof typeof layers];
-              return (
-                <button key={key}
-                  onClick={() => toggleLayer(key as keyof typeof layers)}
-                  style={{
-                    padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
-                    border: `1px solid ${on ? "#9ca3af" : "#e5e7eb"}`,
-                    background: on ? "#f3f4f6" : "#fff",
-                    color: on ? "#374151" : "#d1d5db",
-                  }}>{label}</button>
-              );
-            })}
-
-            {/* Sleeve discipline sub-filters, shown when スリーブ layer is on */}
-            {layers.sleeve && (
-              <>
-                <span style={{ color: "#d1d5db", margin: "0 2px" }}>›</span>
-                {(["衛生", "空調", "電気", "その他"] as const).map((disc) => {
-                  const on = sleeveFilters[disc];
-                  const cnt = sleeveCounts[disc];
-                  const color =
-                    disc === "衛生" ? "#3b82f6" :
-                    disc === "空調" ? "#f59e0b" :
-                    disc === "電気" ? "#ef4444" : "#6b7280";
-                  return (
-                    <button key={disc}
-                      onClick={() => toggleSleeveFilter(disc)}
-                      disabled={cnt === 0}
-                      style={{
-                        padding: "2px 8px", borderRadius: 4, cursor: cnt === 0 ? "default" : "pointer", fontSize: 10,
-                        border: `1px solid ${on && cnt > 0 ? color : "#e5e7eb"}`,
-                        background: on && cnt > 0 ? `${color}15` : "#fff",
-                        color: on && cnt > 0 ? color : "#d1d5db",
-                        opacity: cnt === 0 ? 0.4 : 1,
-                      }}>{disc} {cnt > 0 && <span style={{ opacity: 0.7 }}>({cnt})</span>}</button>
-                  );
-                })}
-              </>
-            )}
-
-            <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
-            <span style={{ color: "#9ca3af", fontSize: 10 }}>色分け</span>
-            <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 5, padding: 2, gap: 1 }}>
-              {([["severity", "判定"], ["fl", "FL高さ"], ["discipline", "設備"]] as const).map(([mode, label]) => (
-                <button key={mode} onClick={() => setColorMode(mode)}
-                  style={{
-                    padding: "2px 10px", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 10,
-                    fontWeight: colorMode === mode ? 500 : 400,
-                    background: colorMode === mode ? "#fff" : "transparent",
-                    color: colorMode === mode ? "#111827" : "#9ca3af",
-                    boxShadow: colorMode === mode ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
-                  }}>{label}</button>
-              ))}
-            </div>
-
-            <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
-            <span style={{ color: "#9ca3af", fontSize: 10 }}>PDF重ね</span>
-            <input
-              ref={pdfInputRef}
-              type="file"
-              accept=".pdf"
-              style={{ display: "none" }}
-              onChange={(e) => handleUploadPdf(e.target.files)}
-            />
-            <button
-              onClick={() => pdfInputRef.current?.click()}
-              style={{
-                padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
-                border: "1px solid #d1d5db", background: pdfOverlayUrl ? "#eff6ff" : "#fff",
-                color: pdfOverlayUrl ? "#1d4ed8" : "#374151",
-              }}
-            >{pdfOverlayUrl ? "PDF読込済" : "PDF選択"}</button>
-            {pdfOverlayUrl && (
-              <>
-                <input
-                  type="range" min={0} max={100} value={Math.round(pdfOverlayOpacity * 100)}
-                  onChange={(e) => setPdfOverlayOpacity(Number(e.target.value) / 100)}
-                  style={{ width: 80 }}
-                />
-                <span style={{ fontSize: 10, color: "#6b7280", minWidth: 28 }}>
-                  {Math.round(pdfOverlayOpacity * 100)}%
-                </span>
-                <button
-                  onClick={() => setPdfOverlayUrl(null)}
-                  style={{
-                    padding: "2px 6px", borderRadius: 4, cursor: "pointer", fontSize: 10,
-                    border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280",
-                  }}
-                >×</button>
-              </>
-            )}
-
-            {/* Color legend */}
-            {colorMode === "severity" && (
-              <div style={{ display: "flex", gap: 8, fontSize: 10, alignItems: "center", marginLeft: 4 }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />NG</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#d97706", display: "inline-block" }} />WARN</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16a34a", display: "inline-block" }} />OK</span>
-              </div>
-            )}
-            {colorMode === "discipline" && (
-              <div style={{ display: "flex", gap: 8, fontSize: 10, alignItems: "center", marginLeft: 4 }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />衛生</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />空調</span>
-              </div>
-            )}
-          </>
-        )}
       </div>
 
       {/* DWG conversion error toast */}
@@ -509,6 +330,54 @@ function App() {
         </div>
       )}
 
+      {/* Drawing (DXF/DWG) upload modal */}
+      {drawingModalOpen && (
+        <div
+          onClick={() => !loading && setDrawingModalOpen(false)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
+            zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 10, padding: 24, width: 460, boxShadow: "0 10px 40px rgba(0,0,0,0.15)" }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>図面をアップロード</div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 18 }}>
+              .dxf または .dwg ファイルを指定してください。DWGはサーバー側で自動的にDXFに変換します（数秒〜数十秒）。
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <input type="file" accept=".dxf,.dwg"
+                onChange={(e) => setDrawingFile(e.target.files?.[0] ?? null)}
+                style={{ fontSize: 12, width: "100%" }} />
+              {drawingFile && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>{drawingFile.name}</div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                onClick={() => { if (!loading) { setDrawingModalOpen(false); setDrawingFile(null); } }}
+                disabled={loading}
+                style={{ padding: "6px 16px", fontSize: 12, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}
+              >キャンセル</button>
+              <button
+                onClick={handleDrawingSubmit}
+                disabled={!drawingFile || loading}
+                style={{
+                  padding: "6px 16px", fontSize: 12, border: "none", borderRadius: 6,
+                  background: (!drawingFile || loading) ? "#d1d5db" : "#ff4b4b",
+                  color: "#fff", cursor: (!drawingFile || loading) ? "default" : "pointer",
+                  fontWeight: 500,
+                }}
+              >{dwgConverting ? "DWG変換中..." : loading ? "アップロード中..." : "登録"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* IFC upload modal */}
       {ifcModalOpen && (
         <div
@@ -522,47 +391,47 @@ function App() {
             onClick={(e) => e.stopPropagation()}
             style={{ background: "#fff", borderRadius: 10, padding: 24, width: 460, boxShadow: "0 10px 40px rgba(0,0,0,0.15)" }}
           >
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>IFCファイルをアップロード</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>IFCをアップロード</div>
             <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 18 }}>
-              スリーブIFC（必須）と躯体IFC（任意）を指定してください。躯体IFCが無くても表示は可能ですが、一部チェック（下階壁干渉・段差等）は躯体IFC未提供扱いになります。
+              建築IFC（躯体・壁・スラブ・柱）と 設備IFC（スリーブ・配管）を両方指定してください。建築と設備の干渉をチェックするため両方必須です。
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>スリーブIFC <span style={{ color: "#dc2626" }}>*</span></div>
+              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>建築IFC <span style={{ color: "#dc2626" }}>*</span></div>
               <input type="file" accept=".ifc"
-                onChange={(e) => setIfcSleeveFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => setIfcArchFile(e.target.files?.[0] ?? null)}
                 style={{ fontSize: 12, width: "100%" }} />
-              {ifcSleeveFile && (
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{ifcSleeveFile.name}</div>
+              {ifcArchFile && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{ifcArchFile.name}</div>
               )}
             </div>
 
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>躯体IFC（任意）</div>
+              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>設備IFC <span style={{ color: "#dc2626" }}>*</span></div>
               <input type="file" accept=".ifc"
-                onChange={(e) => setIfcStructureFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => setIfcMepFile(e.target.files?.[0] ?? null)}
                 style={{ fontSize: 12, width: "100%" }} />
-              {ifcStructureFile && (
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{ifcStructureFile.name}</div>
+              {ifcMepFile && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{ifcMepFile.name}</div>
               )}
             </div>
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button
-                onClick={() => { if (!loading) { setIfcModalOpen(false); setIfcSleeveFile(null); setIfcStructureFile(null); } }}
+                onClick={() => { if (!loading) { setIfcModalOpen(false); setIfcMepFile(null); setIfcArchFile(null); } }}
                 disabled={loading}
                 style={{ padding: "6px 16px", fontSize: 12, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}
               >キャンセル</button>
               <button
                 onClick={handleIfcSubmit}
-                disabled={!ifcSleeveFile || loading}
+                disabled={!ifcMepFile || !ifcArchFile || loading}
                 style={{
                   padding: "6px 16px", fontSize: 12, border: "none", borderRadius: 6,
-                  background: !ifcSleeveFile || loading ? "#d1d5db" : "#ff4b4b",
-                  color: "#fff", cursor: !ifcSleeveFile || loading ? "default" : "pointer",
+                  background: (!ifcMepFile || !ifcArchFile || loading) ? "#d1d5db" : "#ff4b4b",
+                  color: "#fff", cursor: (!ifcMepFile || !ifcArchFile || loading) ? "default" : "pointer",
                   fontWeight: 500,
                 }}
-              >{loading ? "アップロード中..." : "アップロード"}</button>
+              >{loading ? "アップロード中..." : "登録"}</button>
             </div>
           </div>
         </div>
@@ -572,14 +441,23 @@ function App() {
       <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
         {floors.length === 0 ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, color: "#9ca3af" }}>
-            <div style={{ fontSize: 14 }}>DXFファイルをアップロードしてください</div>
-            <button onClick={() => fileInputRef.current?.click()}
-              style={{
-                padding: "10px 24px", fontSize: 13, background: "#fff", border: "2px dashed #d1d5db",
-                borderRadius: 8, color: "#6b7280", cursor: "pointer",
-              }}>
-              + DXFファイルを選択
-            </button>
+            <div style={{ fontSize: 14 }}>図面 (DXF/DWG) または IFC を追加してください</div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setDrawingModalOpen(true)}
+                style={{
+                  padding: "10px 24px", fontSize: 13, background: "#fff", border: "2px dashed #d1d5db",
+                  borderRadius: 8, color: "#6b7280", cursor: "pointer",
+                }}>
+                + 図面を追加
+              </button>
+              <button onClick={() => setIfcModalOpen(true)}
+                style={{
+                  padding: "10px 24px", fontSize: 13, background: "#fff", border: "2px dashed #d1d5db",
+                  borderRadius: 8, color: "#6b7280", cursor: "pointer",
+                }}>
+                + IFCを追加
+              </button>
+            </div>
           </div>
         ) : viewMode === "drawing" ? (
           <>
@@ -601,6 +479,14 @@ function App() {
                   highlightCoords={highlightCoords}
                   pdfOverlayUrl={pdfOverlayUrl}
                   pdfOverlayOpacity={pdfOverlayOpacity}
+                  onToggleLayer={(key) => toggleLayer(key as keyof typeof layers)}
+                  onToggleSleeveFilter={(key) => toggleSleeveFilter(key)}
+                  onColorModeChange={setColorMode}
+                  sleeveCounts={sleeveCounts}
+                  showLowerWallToggle={activeFloor.id === "2f"}
+                  onPdfFilesSelected={handleUploadPdf}
+                  onPdfClear={() => setPdfOverlayUrl(null)}
+                  onPdfOpacityChange={setPdfOverlayOpacity}
                 />
               ) : (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
@@ -649,6 +535,7 @@ function App() {
                 floorData={floorData}
                 results={results}
                 filter={filter}
+                onFilterChange={setFilter}
                 openChecks={openChecks}
                 onOpenChecksChange={setOpenChecks}
                 onNavigate={(coords, sleeveId, relatedCoords) => {

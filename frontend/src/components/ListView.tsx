@@ -5,6 +5,7 @@ interface Props {
   floorData: FloorData;
   results: CheckResult[];
   filter: "all" | "NG" | "WARNING" | "OK";
+  onFilterChange: (v: "all" | "NG" | "WARNING" | "OK") => void;
   openChecks: Set<number>;
   onOpenChecksChange: (v: Set<number>) => void;
   onNavigate?: (coords: [number, number], sleeveId?: string, relatedCoords?: [number, number][]) => void;
@@ -28,7 +29,7 @@ const CHECK_DEFS: { id: number; name: string }[] = [
 
 const SEV_ORDER = { NG: 0, WARNING: 1, OK: 2 };
 
-export default function ListView({ floorData, results, filter, openChecks, onOpenChecksChange, onNavigate }: Props) {
+export default function ListView({ floorData, results, filter, onFilterChange, openChecks, onOpenChecksChange, onNavigate }: Props) {
   const toggleCheck = (id: number) => {
     const next = new Set(openChecks);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -71,8 +72,34 @@ export default function ListView({ floorData, results, filter, openChecks, onOpe
 
   const sevColor = (s: string) => s === "NG" ? "#dc2626" : s === "WARNING" ? "#d97706" : "#16a34a";
 
+  const filterColors: Record<string, { border: string; color: string; bg: string }> = {
+    NG: { border: "#fecaca", color: "#dc2626", bg: "#fef2f2" },
+    WARNING: { border: "#fde68a", color: "#d97706", bg: "#fffbeb" },
+    OK: { border: "#bbf7d0", color: "#16a34a", bg: "#f0fdf4" },
+  };
+
   return (
     <div style={{ background: "#ffffff" }}>
+      <div className="no-print" style={{
+        display: "flex", gap: 6, padding: "8px 20px",
+        borderBottom: "1px solid #f3f4f6", background: "#fff",
+      }}>
+        {([["all", "全て"], ["NG", "NG"], ["WARNING", "WARN"], ["OK", "OK"]] as const).map(([val, label]) => {
+          const isActive = filter === val;
+          const c = filterColors[val];
+          return (
+            <button key={val} onClick={() => onFilterChange(val)}
+              style={{
+                padding: "3px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11,
+                border: "1px solid",
+                borderColor: isActive ? (c?.border || "#d1d5db") : "#e5e7eb",
+                background: isActive ? (c?.bg || "#f3f4f6") : "#fff",
+                color: c?.color || "#111827",
+                fontWeight: isActive ? 500 : 400,
+              }}>{label}</button>
+          );
+        })}
+      </div>
       {filtered.map(group => {
         const isOpen = openChecks.has(group.checkId);
         return (
