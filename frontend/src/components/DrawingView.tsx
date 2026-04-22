@@ -253,11 +253,16 @@ export default function DrawingView({
             stroke="#8b5cf6" strokeWidth={40} opacity={0.4} />
         ))}
 
-        {/* Walls */}
-        {layers.wall && floorData.wall_lines.map((w, i) => (
-          <line key={`w${i}`} x1={w.start[0]} y1={w.start[1]} x2={w.end[0]} y2={w.end[1]}
-            stroke="#64748b" strokeWidth={25} />
-        ))}
+        {/* Walls — outer building walls (external shell) drawn heavier/darker */}
+        {layers.wall && floorData.wall_lines.map((w, i) => {
+          const isOuter = /外壁/.test(w.layer);
+          return (
+            <line key={`w${i}`} x1={w.start[0]} y1={w.start[1]} x2={w.end[0]} y2={w.end[1]}
+              stroke={isOuter ? "#111827" : "#64748b"}
+              strokeWidth={isOuter ? 55 : 25}
+              strokeLinecap={isOuter ? "round" : undefined} />
+          );
+        })}
 
         {/* Step lines */}
         {layers.step && floorData.step_lines.map((s, i) => (
