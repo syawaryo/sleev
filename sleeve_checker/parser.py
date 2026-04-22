@@ -1036,13 +1036,18 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
         "F201_Ｓ柱", "F201_S柱",
         "A412_柱", "A411_柱", "A511_柱",
         "F204_鉄骨間柱",
-        "間柱",  # door-jamb / elevator-frame stud columns
+        "間柱",                         # incl. エレベーター_間柱
+        "エレベーター",                 # elevator frame steelwork
+        "F203_ブレース", "ブレース",    # steel braces between columns
+        "F108_7_根巻きコン", "根巻",    # column-base concrete collar
+        "鉄骨ジョイント", "ジョイント",
+        "鉄骨対応",
+        "鉄筋_柱", "鉄器_柱",
         "A521_壁：仕上", "A521_壁:仕上",
-        # Fallback — catch non-standard naming
         "_柱",
         "_RC柱",
         "_S柱", "_Ｓ柱",
-        "]柱",  # bracketed discipline prefix: [建築]柱
+        "]柱",
     ]
     col_layers = _find_layers_any(doc, col_keywords)
 
@@ -2178,6 +2183,69 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         cls.segment.side_a_fl = cls.side_a_fl
         cls.segment.side_b_fl = cls.side_b_fl
         cls.segment.fl_status = cls.status
+
+    # ---------------------------------------------------------------------
+    # Stair-room exclusion.
+    # 階段室 is drawn with dense structural detail (stair stringer columns,
+    # handrails, tread fragments) that visually mushrooms into noise right
+    # where it meets the main plan edges. The project stakeholder wants
+    # those regions cleared out of the sleeve-check view. We locate each
+    # "階段" TEXT placed on the room-name layer and treat a 3.5 m radius
+    # around it as an exclusion disc. Walls, columns, step fragments and
+    # dim references whose endpoints fall inside any such disc are dropped.
+    # Sleeves themselves are LEFT IN — stair penetrations are still valid
+    # sleeve-check subjects — so this is a pure rendering-scope cleanup.
+    # ---------------------------------------------------------------------
+    STAIR_EXCLUSION_RADIUS = 3500.0
+    stair_centers: list[tuple[float, float]] = []
+    for entity in msp:
+        if entity.dxftype() not in ("TEXT", "MTEXT"):
+            continue
+        try:
+            txt = entity.dxf.text if entity.dxftype() == "TEXT" else entity.plain_mtext()
+        except Exception:
+            continue
+        if not txt or "階段" not in txt:
+            continue
+        layer = entity.dxf.layer
+        # Only the official room-name layer, to avoid matching annotation
+        # notes like "階段3下部床伏図・" that live elsewhere on the sheet.
+        if "A211" not in layer and "室名" not in layer:
+            continue
+        try:
+            pos = entity.dxf.insert
+            x, y = float(pos.x), float(pos.y)
+        except Exception:
+            continue
+        if _point_in_building_bbox(x, y):
+            stair_centers.append((x, y))
+
+    def _outside_all_stairs(px: float, py: float) -> bool:
+        for cx, cy in stair_centers:
+            if (px - cx) ** 2 + (py - cy) ** 2 <= STAIR_EXCLUSION_RADIUS ** 2:
+                return False
+        return True
+
+    def _segment_outside_stairs(sx: float, sy: float, ex: float, ey: float) -> bool:
+        # Reject if either endpoint OR midpoint falls inside a stair disc.
+        mx, my = (sx + ex) / 2.0, (sy + ey) / 2.0
+        return (
+            _outside_all_stairs(sx, sy)
+            and _outside_all_stairs(ex, ey)
+            and _outside_all_stairs(mx, my)
+        )
+
+    if stair_centers:
+        wall_lines = [w for w in wall_lines
+                      if _segment_outside_stairs(w.start[0], w.start[1], w.end[0], w.end[1])]
+        column_lines = [c for c in column_lines
+                        if _segment_outside_stairs(c.start[0], c.start[1], c.end[0], c.end[1])]
+        step_lines = [s for s in step_lines
+                      if _segment_outside_stairs(s.start[0], s.start[1], s.end[0], s.end[1])]
+        slab_outlines = [o for o in slab_outlines
+                         if _segment_outside_stairs(o.start[0], o.start[1], o.end[0], o.end[1])]
+        slab_labels = [sl for sl in slab_labels if _outside_all_stairs(sl.x, sl.y)]
+        slab_zones = [z for z in slab_zones if _outside_all_stairs(z.x, z.y)]
 
     return FloorData(
         sleeves=sleeves,
