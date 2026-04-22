@@ -102,6 +102,14 @@ export interface RawText {
   color: number | null;
 }
 
+export interface RoomLabel {
+  x: number;
+  y: number;
+  text: string;
+  height: number;
+  rotation: number;
+}
+
 export interface FloorData {
   sleeves: Sleeve[];
   grid_lines: GridLine[];
@@ -116,6 +124,7 @@ export interface FloorData {
   pn_labels: PnLabel[];
   raw_lines?: RawLine[];
   raw_texts?: RawText[];
+  room_labels?: RoomLabel[];
   slab_level: string | null;
 }
 

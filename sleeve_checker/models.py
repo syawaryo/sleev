@@ -139,6 +139,16 @@ class RawText:
 
 
 @dataclass
+class RoomLabel:
+    """A room-name text placed on A211_室名 — e.g. '店舗１', 'エントランス'."""
+    x: float
+    y: float
+    text: str
+    height: float = 0.0
+    rotation: float = 0.0
+
+
+@dataclass
 class FloorData:
     sleeves: list[Sleeve] = field(default_factory=list)
     grid_lines: list[GridLine] = field(default_factory=list)
@@ -154,6 +164,7 @@ class FloorData:
     water_gradients: list[WaterGradient] = field(default_factory=list)
     raw_lines: list[RawLine] = field(default_factory=list)
     raw_texts: list[RawText] = field(default_factory=list)
+    room_labels: list[RoomLabel] = field(default_factory=list)
     slab_level: str | None = None
     has_base_level_def: bool = False
 

@@ -22,6 +22,7 @@ from .models import (
     PnLabel,
     RawLine,
     RawText,
+    RoomLabel,
     SlabLabel,
     SlabOutline,
     SlabZone,
@@ -2187,7 +2188,13 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         cls.segment.side_b_fl = cls.side_b_fl
         cls.segment.fl_status = cls.status
 
-    raw_lines, raw_texts = _extract_raw_drawing(doc, msp)
+    # raw passthrough kept as opt-in only — descending into every INSERT
+    # block across 17k+ entities adds seconds to the parse and the UI can't
+    # render that much SVG meaningfully. Room names are extracted directly
+    # below; turn this back on when someone needs the full debug view.
+    raw_lines: list[RawLine] = []
+    raw_texts: list[RawText] = []
+    room_labels = _extract_room_labels(doc, msp)
 
     return FloorData(
         sleeves=sleeves,
@@ -2204,9 +2211,45 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         water_gradients=water_gradients,
         raw_lines=raw_lines,
         raw_texts=raw_texts,
+        room_labels=room_labels,
         slab_level=slab_level,
         has_base_level_def=has_base_level_def,
     )
+
+
+def _extract_room_labels(doc, msp) -> list[RoomLabel]:
+    """Pull TEXT / MTEXT on A211_室名 (room-name) layers.
+
+    Restricted to the proper room-name layer so annotations elsewhere
+    that happen to contain room-like words don't leak in.
+    """
+    layers = {
+        l.dxf.name for l in doc.layers
+        if "A211" in l.dxf.name or "室名" in l.dxf.name
+    }
+    out: list[RoomLabel] = []
+    for e in msp:
+        if e.dxf.layer not in layers:
+            continue
+        kind = e.dxftype()
+        if kind == "TEXT":
+            txt = (e.dxf.text or "").strip()
+        elif kind == "MTEXT":
+            try:
+                txt = e.plain_text().strip()
+            except Exception:
+                txt = ""
+        else:
+            continue
+        if not txt:
+            continue
+        pos = e.dxf.insert
+        out.append(RoomLabel(
+            x=float(pos.x), y=float(pos.y), text=txt,
+            height=float(getattr(e.dxf, "height", 400.0) or getattr(e.dxf, "char_height", 400.0) or 400.0),
+            rotation=float(getattr(e.dxf, "rotation", 0.0) or 0.0),
+        ))
+    return out
 
 
 # ---------------------------------------------------------------------------

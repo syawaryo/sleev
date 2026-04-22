@@ -51,7 +51,7 @@ function App() {
   const [highlightCoords, setHighlightCoords] = useState<[number, number][]>([]);
   const [openChecks, setOpenChecks] = useState<Set<number>>(new Set());
   const [layers, setLayers] = useState({
-    grid: true, wall: true, outerWall: true, step: true, recess: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false, raw: true,
+    grid: true, wall: true, outerWall: true, step: true, recess: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false, raw: false, room: true,
   });
   const [sleeveFilters, setSleeveFilters] = useState({
     衛生: true, 空調: true, 電気: true, その他: true,
@@ -375,7 +375,7 @@ function App() {
               ["column", "柱・仕上"],
               ["dim", "寸法"],
               ["slabLevel", "スラブレベル"],
-              ["raw", "その他(全要素)"],
+              ["room", "部屋名"],
               ["sleeve", "スリーブ"],
               ...(activeFloor.id === "2f" ? [["lowerWall", "1F壁"]] : []),
             ] as string[][]).map(([key, label]) => {

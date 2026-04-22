@@ -23,7 +23,7 @@ from sleeve_checker.checks import run_all_checks
 from sleeve_checker.models import (
     FloorData, Sleeve, GridLine, DimLine, WallLine, StepLine,
     ColumnLine, SlabZone, SlabLabel, SlabOutline, PnLabel, RecessPolygon,
-    RawLine, RawText,
+    RawLine, RawText, RoomLabel,
 )
 from sleeve_checker.parser import parse_dxf
 from sleeve_checker.ifc_parser import parse_ifc
@@ -213,6 +213,11 @@ def _dict_to_floor_data(d: dict) -> FloorData:
             height=rt.get("height", 0.0), rotation=rt.get("rotation", 0.0),
             color=rt.get("color"),
         ) for rt in d.get("raw_texts", [])],
+        room_labels=[RoomLabel(
+            x=r.get("x", 0.0), y=r.get("y", 0.0),
+            text=r.get("text", ""),
+            height=r.get("height", 0.0), rotation=r.get("rotation", 0.0),
+        ) for r in d.get("room_labels", [])],
         slab_level=d.get("slab_level"),
         has_base_level_def=d.get("has_base_level_def", False),
     )

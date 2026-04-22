@@ -8,7 +8,7 @@ interface Props {
   onSleeveHover: (sleeve: Sleeve | null) => void;
   onSleeveClick: (sleeve: Sleeve | null) => void;
   selectedSleeveId: string | null;
-  layers: { grid: boolean; wall: boolean; outerWall: boolean; step: boolean; recess: boolean; column: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean; raw: boolean };
+  layers: { grid: boolean; wall: boolean; outerWall: boolean; step: boolean; recess: boolean; column: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean; raw: boolean; room: boolean };
   sleeveFilters: { 衛生: boolean; 空調: boolean; 電気: boolean; その他: boolean };
   colorMode: "severity" | "fl" | "discipline";
   pdfOverlayUrl?: string | null;
@@ -125,6 +125,19 @@ const StaticLayers = memo(function StaticLayers({
         <g key={`rawt-${i}`} transform={`translate(${t.x},${t.y}) scale(1,-1)${t.rotation ? ` rotate(${-t.rotation})` : ""}`}>
           <text x={0} y={0} fontSize={Math.max(t.height || 250, 250)}
                 fill="#475569" fontFamily="'Noto Sans JP',sans-serif">{t.text}</text>
+        </g>
+      ))}
+
+      {/* Room labels (部屋名) — typed extraction from A211_室名 layer only */}
+      {layers.room && (floorData.room_labels || []).map((r, i) => (
+        <g key={`room-${i}`} transform={`translate(${r.x},${r.y}) scale(1,-1)${r.rotation ? ` rotate(${-r.rotation})` : ""}`}>
+          <text x={0} y={0}
+                fontSize={Math.max(r.height || 500, 500)}
+                fill="#1e293b" fontWeight={600}
+                fontFamily="'Noto Sans JP', 'Yu Gothic', 'Hiragino Sans', sans-serif"
+                style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 60, strokeLinejoin: "round" }}>
+            {r.text}
+          </text>
         </g>
       ))}
 
