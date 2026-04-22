@@ -8,7 +8,7 @@ interface Props {
   onSleeveHover: (sleeve: Sleeve | null) => void;
   onSleeveClick: (sleeve: Sleeve | null) => void;
   selectedSleeveId: string | null;
-  layers: { grid: boolean; wall: boolean; outerWall: boolean; step: boolean; column: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean };
+  layers: { grid: boolean; wall: boolean; outerWall: boolean; step: boolean; recess: boolean; column: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean };
   sleeveFilters: { 衛生: boolean; 空調: boolean; 電気: boolean; その他: boolean };
   colorMode: "severity" | "fl" | "discipline";
   pdfOverlayUrl?: string | null;
@@ -91,24 +91,29 @@ const StaticLayers = memo(function StaticLayers({
 
   return (
     <>
-      {/* Grid lines + axis-label bubbles */}
+      {/* Grid lines + axis-label bubbles — drawn as 一点鎖線 (chain-dot),
+          darker than walls so they read as the drawing's skeleton. */}
       {layers.grid && gridFrame && floorData.grid_lines.flatMap((g, i) => {
         const { x1, x2, y1, y2, bubbleR } = gridFrame;
         const endpoints: [number, number][] = g.direction === "H"
           ? [[x1 - bubbleR, g.position], [x2 + bubbleR, g.position]]
           : [[g.position, y1 - bubbleR], [g.position, y2 + bubbleR]];
+        // 一点鎖線 pattern: long-dash, short gap, dot, short gap.
+        // Values are in SVG user units (mm). Tuned so the pattern shows
+        // cleanly at typical zoom levels.
+        const chainDot = "800 150 30 150";
         const line = g.direction === "H" ? (
           <line key={`gh${i}`} x1={x1} y1={g.position} x2={x2} y2={g.position}
-            stroke="#9ca3af" strokeWidth={15} strokeDasharray="300,150" />
+            stroke="#1f2937" strokeWidth={22} strokeDasharray={chainDot} opacity={0.75} />
         ) : (
           <line key={`gv${i}`} x1={g.position} y1={y1} x2={g.position} y2={y2}
-            stroke="#9ca3af" strokeWidth={15} strokeDasharray="300,150" />
+            stroke="#1f2937" strokeWidth={22} strokeDasharray={chainDot} opacity={0.75} />
         );
         const bubbles = endpoints.map(([lx, ly], pi) => (
           <g key={`gl${i}-${pi}`} transform={`translate(${lx} ${ly})`}>
-            <circle cx={0} cy={0} r={bubbleR} fill="#fff" stroke="#6b7280" strokeWidth={25} />
+            <circle cx={0} cy={0} r={bubbleR} fill="#fff" stroke="#111827" strokeWidth={35} />
             <text x={0} y={0} textAnchor="middle" dominantBaseline="central"
-                  fontSize={bubbleR * 1.2} fill="#374151" fontWeight={700}
+                  fontSize={bubbleR * 1.2} fill="#111827" fontWeight={700}
                   fontFamily="'Inter','Noto Sans JP',sans-serif"
                   transform="scale(1,-1)">{g.axis_label}</text>
           </g>
@@ -135,11 +140,31 @@ const StaticLayers = memo(function StaticLayers({
         );
       })}
 
-      {/* Step lines */}
-      {layers.step && floorData.step_lines.map((s, i) => (
-        <line key={`s${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
-          stroke="#d97706" strokeWidth={25} opacity={0.8} />
-      ))}
+      {/* Recess polygons (床ヌスミ) — rendered as translucent fills so they read
+          as "floor depressions" rather than "step lines". */}
+      {layers.recess && floorData.recess_polygons?.map((rp, i) => {
+        const d = rp.vertices.length
+          ? "M " + rp.vertices.map(([x, y]) => `${x} ${y}`).join(" L ") + " Z"
+          : "";
+        if (!d) return null;
+        return (
+          <path key={`r${i}`} d={d}
+            fill="#0ea5e9" fillOpacity={0.22}
+            stroke="#0369a1" strokeWidth={15} strokeOpacity={0.7}
+            strokeDasharray="60 30" />
+        );
+      })}
+
+      {/* Step lines — FL-verified: hide "spurious" (same FL both sides),
+          dim "unknown" so the eye focuses on confirmed steps. */}
+      {layers.step && floorData.step_lines.map((s, i) => {
+        if (s.fl_status === "spurious") return null;
+        const opacity = s.fl_status === "real" ? 0.9 : 0.5;
+        return (
+          <line key={`s${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
+            stroke="#d97706" strokeWidth={25} opacity={opacity} />
+        );
+      })}
 
       {/* Column / wall-finish lines */}
       {layers.column && floorData.column_lines.map((c, i) => (
