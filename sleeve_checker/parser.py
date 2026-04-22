@@ -2017,7 +2017,10 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     _attach_label_texts(sleeves, doc, msp, step_lines=step_lines)
     for s in sleeves:
         s.sleeve_type = _classify_sleeve_type(s.label_text, s.discipline)
-        _refine_sleeve_shape_from_label(s)
+        # Do NOT rewrite shape based on the φXXX label. If the DXF draws
+        # the sleeve as a rectangle, we render it as a rectangle — the
+        # drafter's intent is the ground truth. Orientation inference
+        # below still reads the original rect geometry.
         s.orientation = _infer_sleeve_orientation(s)
     # Second pass: recover "unknown" sleeves via adjacency / pair detection.
     _infer_orientation_from_pairs(sleeves)
