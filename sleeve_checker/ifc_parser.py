@@ -53,6 +53,23 @@ def _discipline_from_layer(layer: str | None) -> str:
     return ""
 
 
+def _parse_tfas_point(raw: str | None) -> tuple[float, float, float] | None:
+    """Parse a Tfas Pset point string like '75468.0,1030.0,-785.5,' → tuple.
+
+    Returns None if the string is missing or not parseable.
+    """
+    if not raw:
+        return None
+    parts = str(raw).split(",")
+    try:
+        nums = [float(p.strip()) for p in parts if p.strip() != ""]
+    except ValueError:
+        return None
+    if len(nums) < 3:
+        return None
+    return (nums[0], nums[1], nums[2])
+
+
 def _profile_geometry(solid) -> tuple[str, float, float] | None:
     """Return (shape, width, height) from an IfcExtrudedAreaSolid profile.
 
@@ -107,14 +124,44 @@ def _extract_sleeves(f) -> list[Sleeve]:
             M = _place_util.get_local_placement(p.ObjectPlacement)
         except Exception:
             continue
-        x = float(M[0, 3])
-        y = float(M[1, 3])
 
         psets = _elem_util.get_psets(p) or {}
         basic = psets.get("Pset_Tfas_SystemProperty_Basic", {})
         cable = psets.get("Pset_Tfas_SystemProperty_Cable_Duct_Tray", {})
         plumb = psets.get("Pset_Tfas_SystemProperty_HVAC_Plumbing_Parts", {})
         circ = psets.get("Pset_BE-Bridge_SleeveCircular", {})
+        bridge_common = psets.get("Pset_BE-Bridge_Common", {})
+
+        # Tfas places its reference point at one END of the sleeve (= connecting_
+        # point_1 / wall face). DXF drafting convention draws the sleeve symbol
+        # at the wall centreline = midpoint of the two connecting points. Use the
+        # midpoint here so IFC and DXF sleeves align 1:1 on the same drawing.
+        cp1 = _parse_tfas_point(bridge_common.get("connecting_point_1"))
+        cp2 = _parse_tfas_point(bridge_common.get("connecting_point_2"))
+        if cp1 is not None and cp2 is not None:
+            x = (cp1[0] + cp2[0]) / 2.0
+            y = (cp1[1] + cp2[1]) / 2.0
+        else:
+            x = float(M[0, 3])
+            y = float(M[1, 3])
+
+        # Orientation: main_vecter is the principal axis of the pipe/duct
+        # passing through the sleeve. Z-dominant → vertical (縦管), otherwise
+        # horizontal (横管). Stored as "(x,y,z)" string in the Tfas export.
+        orientation = ""
+        mv_str = bridge_common.get("main_vecter") or bridge_common.get("main_vector") or ""
+        if mv_str:
+            try:
+                parts = [float(v) for v in str(mv_str).split(",")[:3]]
+                if len(parts) == 3:
+                    ax, ay, az = parts
+                    # |z| dominant → vertical pipe; else horizontal.
+                    if abs(az) > max(abs(ax), abs(ay)):
+                        orientation = "vertical"
+                    else:
+                        orientation = "horizontal"
+            except (TypeError, ValueError):
+                pass
 
         shape, width, height = _sleeve_geometry(p)
         # For round: diameter = width (== height). For rect: short cross-section.
@@ -168,6 +215,7 @@ def _extract_sleeves(f) -> list[Sleeve]:
             height=height,
             color=None,  # IFC doesn't carry ACI color
             sleeve_type=sleeve_type,
+            orientation=orientation,
         ))
     return sleeves
 

@@ -12,6 +12,7 @@ export interface Sleeve {
   height?: number;
   color?: number | null;  // ACI color index (1 = red)
   sleeve_type?: "duct" | "pipe" | "cable" | "";
+  orientation?: "vertical" | "horizontal" | "";
 }
 
 export interface GridLine {

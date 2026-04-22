@@ -161,6 +161,7 @@ def _dict_to_floor_data(d: dict) -> FloorData:
             height=s.get("height", s["diameter"]),
             color=s.get("color"),
             sleeve_type=s.get("sleeve_type", ""),
+            orientation=s.get("orientation", ""),
         ) for s in d.get("sleeves", [])],
         grid_lines=[GridLine(
             axis_label=g["axis_label"], direction=g["direction"], position=g["position"],

@@ -75,21 +75,64 @@ _SLEEVE_TYPE_PIPE = re.compile(
 _SLEEVE_TYPE_CABLE = re.compile(r"^(XS|KD|KDK|KV|CR)\b", re.IGNORECASE)
 
 
-def _classify_sleeve_type(label_text: str | None) -> str:
+# Discipline → sleeve_type fallback (used when the text-code lookup fails).
+# Matches the IFC classifier for parity across formats.
+_DISCIPLINE_TO_TYPE = {"衛生": "pipe", "空調": "duct", "電気": "cable"}
+
+
+def _classify_sleeve_type(
+    label_text: str | None, discipline: str | None = None
+) -> str:
     """Map the equipment code in *label_text* to a sleeve sub-type.
+
+    Priority:
+      1. Explicit equipment code at the start of label_text (EA/CW/…).
+      2. Discipline fallback from the layer name (衛生/空調/電気).
 
     Returns "duct" / "pipe" / "cable" / "" (unclassified).
     """
-    if not label_text:
-        return ""
-    lt = label_text.strip()
-    if _SLEEVE_TYPE_DUCT.match(lt):
-        return "duct"
-    if _SLEEVE_TYPE_PIPE.match(lt):
-        return "pipe"
-    if _SLEEVE_TYPE_CABLE.match(lt):
-        return "cable"
+    if label_text:
+        lt = label_text.strip()
+        if _SLEEVE_TYPE_DUCT.match(lt):
+            return "duct"
+        if _SLEEVE_TYPE_PIPE.match(lt):
+            return "pipe"
+        if _SLEEVE_TYPE_CABLE.match(lt):
+            return "cable"
+    if discipline:
+        return _DISCIPLINE_TO_TYPE.get(discipline, "")
     return ""
+
+
+# Matches pipe-diameter notation like "φ124", "Φ200", "125φ", "125A".
+# These denote a ROUND pipe, so the sleeve is a round hole regardless of
+# how the block geometry is drawn (hatched rectangle is common).
+_RE_ROUND_LABEL = re.compile(
+    r"(?:[φΦ]\s*\d+|\d+\s*[φΦ]|\d+\s*A\b|外径\s*\d+)", re.IGNORECASE
+)
+
+
+def _refine_sleeve_shape_from_label(sleeve: Sleeve) -> None:
+    """If the attached label indicates a round pipe (φXXX / XXXA / 外径XXX),
+    override shape to "round".
+
+    This corrects a common DXF drawing convention: round pipe sleeves are
+    sometimes drawn as a hatched rectangle in plan view (no CIRCLE entity
+    inside the block), which our geometry pass tags as "rect". The label
+    text is a more authoritative signal than the hatching rectangle.
+    """
+    if sleeve.shape == "round":
+        return
+    lt = sleeve.label_text or ""
+    dt = sleeve.diameter_text or ""
+    combined = f"{lt} {dt}"
+    if _RE_ROUND_LABEL.search(combined):
+        sleeve.shape = "round"
+        # Collapse width/height to the short side so it renders as a circle
+        # sized by the real pipe diameter, not the hatching rectangle.
+        if sleeve.diameter > 0:
+            sleeve.width = sleeve.diameter
+            sleeve.height = sleeve.diameter
 
 # ---------------------------------------------------------------------------
 # Layer-lookup helpers
@@ -138,13 +181,21 @@ _BLDG_TOLERANCE = 10.0  # mm tolerance for floating-point at boundaries
 
 
 def _in_building_range(x: float, y: float) -> bool:
-    """Deliberately disabled — the hardcoded BLDG_X/Y_MAX bounds were too
-    tight for real buildings, causing outer perimeter walls, dim labels and
-    slab outlines to be silently dropped. Layer-name filtering (which every
-    caller already applies) is a more reliable gate. Kept as a function for
-    call-site compatibility; replace with a data-driven extent when a real
-    need arises."""
-    return True
+    """Loose building-extent check used by the sleeve paths.
+
+    Previously this was hardwired to always-True because the original
+    BLDG_* bounds dropped legitimate outer-perimeter walls and dim labels.
+    For sleeves the problem is the opposite: the sheet carries detail
+    drawings at y ≈ 90k–100k that are not real floor penetrations. We
+    therefore use a GENEROUS bounding box (2× the expected building
+    footprint) that filters only the obvious out-of-scope entries at the
+    drawing margins, while still admitting perimeter elements. Wall /
+    grid / slab extractors already bypass this function where needed.
+    """
+    return (
+        -0.5 * BLDG_X_MAX <= x <= 1.5 * BLDG_X_MAX
+        and -0.5 * BLDG_Y_MAX <= y <= 1.5 * BLDG_Y_MAX
+    )
 
 
 def _resolve_entity_color(doc, entity) -> int | None:
@@ -1779,7 +1830,8 @@ def parse_dxf(filepath: str | Path) -> FloorData:
 
     _attach_label_texts(sleeves, doc, msp, step_lines=step_lines)
     for s in sleeves:
-        s.sleeve_type = _classify_sleeve_type(s.label_text)
+        s.sleeve_type = _classify_sleeve_type(s.label_text, s.discipline)
+        _refine_sleeve_shape_from_label(s)
     column_lines = _extract_column_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
     pn_labels = _extract_pn_labels(doc, msp)

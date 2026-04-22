@@ -18,6 +18,7 @@ class Sleeve:
     height: float = 0.0        # rect: full height (mm); round: equals diameter
     color: int | None = None   # ACI color index (1 = red). None = unknown / BYLAYER.
     sleeve_type: str = ""      # "duct" / "pipe" / "cable" / "" (from equipment code)
+    orientation: str = ""      # "vertical" (縦管) / "horizontal" (横管) / ""
 
 
 @dataclass
