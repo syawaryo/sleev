@@ -1,9 +1,8 @@
 import { useMemo, useState, useRef, useCallback, useEffect, memo } from "react";
 import type { FloorData, Sleeve, CheckResult } from "../types";
 
-type LayerKey = "grid" | "wall" | "outerWall" | "step" | "recess" | "column" | "beam" | "sleeve" | "dim" | "lowerWall" | "slabLevel" | "raw" | "room";
+type LayerKey = "grid" | "wall" | "outerWall" | "step" | "recess" | "column" | "beam" | "sleeve" | "dim" | "lowerWall" | "slabLevel" | "flZone" | "raw" | "room";
 type DisciplineKey = "衛生" | "空調" | "電気" | "その他";
-type ColorMode = "severity" | "fl" | "discipline";
 
 interface Props {
   floorData: FloorData;
@@ -14,7 +13,6 @@ interface Props {
   selectedSleeveId: string | null;
   layers: Record<LayerKey, boolean>;
   sleeveFilters: Record<DisciplineKey, boolean>;
-  colorMode: ColorMode;
   pdfOverlayUrl?: string | null;
   pdfOverlayOpacity?: number;
   navigateTarget?: [number, number] | null;
@@ -23,7 +21,6 @@ interface Props {
   // Toolbar callbacks (moved out of the App header)
   onToggleLayer: (key: LayerKey) => void;
   onToggleSleeveFilter: (key: DisciplineKey) => void;
-  onColorModeChange: (mode: ColorMode) => void;
   sleeveCounts: Record<DisciplineKey, number>;
   showLowerWallToggle: boolean;
   lowerFloorLabel?: string;
@@ -53,12 +50,6 @@ const FL_COLORS: Record<string, string> = {
 const FL_FALLBACK_PALETTE = ["#10b981", "#6366f1", "#eab308", "#f97316", "#0ea5e9", "#a855f7", "#14b8a6", "#f43f5e"];
 const FL_UNKNOWN_COLOR = "#9ca3af";
 
-const DISC_COLORS: Record<string, string> = {
-  "衛生": "#3b82f6",
-  "空調": "#f59e0b",
-  "電気": "#ef4444",
-  "建築": "#6b7280",
-};
 
 const INITIAL_VB = { x: -5000, y: -40000, w: 90000, h: 45000 };
 const MIN_ZOOM_W = 5000;
@@ -80,10 +71,11 @@ interface StaticLayersProps {
   lowerFloorData: FloorData | null;
   layers: LayersState;
   dataBounds: DataBounds | null;
+  flColorMap: Map<string, string>;
 }
 
 const StaticLayers = memo(function StaticLayers({
-  floorData, lowerFloorData, layers,
+  floorData, lowerFloorData, layers, dataBounds, flColorMap,
 }: StaticLayersProps) {
   // Pre-compute outer-wall classification once (regex in render loop is wasteful).
   const wallIsOuter = useMemo(
@@ -133,8 +125,63 @@ const StaticLayers = memo(function StaticLayers({
     }));
   }, [floorData.raw_lines]);
 
+  // FL-zone tiling — Voronoi-style color fill seeded by slab_zones positions.
+  // Each cell finds its nearest slab_zone and inherits that FL's color; runs
+  // of same-color cells in a row are merged into single rects to keep the SVG
+  // compact (~20–80 rects instead of thousands).
+  const flZoneTiles = useMemo(() => {
+    const zones = floorData.slab_zones || [];
+    if (!dataBounds || zones.length === 0) return [] as { x: number; y: number; w: number; h: number; color: string }[];
+    const { minX, maxX, minY, maxY } = dataBounds;
+    const N = 48;
+    const cellW = (maxX - minX) / N;
+    const cellH = (maxY - minY) / N;
+    const tiles: { x: number; y: number; w: number; h: number; color: string }[] = [];
+
+    const nearestColor = (cx: number, cy: number): string => {
+      let bestI = 0;
+      let bestD = Infinity;
+      for (let k = 0; k < zones.length; k++) {
+        const z = zones[k];
+        const d = (z.x - cx) * (z.x - cx) + (z.y - cy) * (z.y - cy);
+        if (d < bestD) { bestD = d; bestI = k; }
+      }
+      const fl = zones[bestI].fl_text || "不明";
+      return flColorMap.get(fl) || FL_UNKNOWN_COLOR;
+    };
+
+    for (let j = 0; j < N; j++) {
+      const y = minY + j * cellH;
+      const cy = y + cellH / 2;
+      let runStartI = 0;
+      let runColor = nearestColor(minX + cellW / 2, cy);
+      for (let i = 1; i <= N; i++) {
+        const cellColor = i < N ? nearestColor(minX + (i + 0.5) * cellW, cy) : null;
+        if (cellColor !== runColor || i === N) {
+          tiles.push({
+            x: minX + runStartI * cellW,
+            y,
+            w: cellW * (i - runStartI),
+            h: cellH,
+            color: runColor,
+          });
+          if (cellColor) {
+            runColor = cellColor;
+            runStartI = i;
+          }
+        }
+      }
+    }
+    return tiles;
+  }, [dataBounds, floorData.slab_zones, flColorMap]);
+
   return (
     <>
+      {/* FL zone tiling — rendered first so every other layer sits on top */}
+      {layers.flZone && flZoneTiles.map((t, i) => (
+        <rect key={`fz${i}`} x={t.x} y={t.y} width={t.w} height={t.h}
+          fill={t.color} opacity={0.18} stroke="none" />
+      ))}
       {/* Raw DXF passthrough — behind everything else, faint grey */}
       {layers.raw && rawPathsByLayer.map(({ layer, d }) => (
         <path key={`raw-${layer}`} d={d}
@@ -361,28 +408,15 @@ const StaticLayers = memo(function StaticLayers({
 
 function getSleeveColors(
   s: Sleeve,
-  colorMode: Props["colorMode"],
   severityMap: SeverityMap,
-  flColorMap: Map<string, string>,
 ): { stroke: string; fill: string } {
-  if (colorMode === "fl") {
-    const key = s.fl_text || "不明";
-    const c = flColorMap.get(key) || FL_UNKNOWN_COLOR;
-    return { stroke: c, fill: c + "20" };
-  }
-  if (colorMode === "discipline") {
-    const c = DISC_COLORS[s.discipline] || "#9ca3af";
-    return { stroke: c, fill: c + "20" };
-  }
   return SEVERITY_COLORS[severityMap.get(s.id) || "OK"];
 }
 
 interface SleeveLayerProps {
   sleeves: Sleeve[];
   sleeveFilters: SleeveFilters;
-  colorMode: Props["colorMode"];
   severityMap: SeverityMap;
-  flColorMap: Map<string, string>;
   selectedSleeveId: string | null;
   onSleeveHover: (s: Sleeve | null) => void;
   onSleeveClick: (s: Sleeve | null) => void;
@@ -390,7 +424,7 @@ interface SleeveLayerProps {
 }
 
 const SleeveLayer = memo(function SleeveLayer({
-  sleeves, sleeveFilters, colorMode, severityMap, flColorMap, selectedSleeveId, onSleeveHover, onSleeveClick, visible,
+  sleeves, sleeveFilters, severityMap, selectedSleeveId, onSleeveHover, onSleeveClick, visible,
 }: SleeveLayerProps) {
   const filtered = useMemo(() => {
     return sleeves.filter(s => {
@@ -405,7 +439,7 @@ const SleeveLayer = memo(function SleeveLayer({
   return (
     <>
       {filtered.map((s) => {
-        const colors = getSleeveColors(s, colorMode, severityMap, flColorMap);
+        const colors = getSleeveColors(s, severityMap);
         const isSelected = s.id === selectedSleeveId;
         const isRect = s.shape === "rect";
         // Render at the drawing's true dimensions. Previously we clamped
@@ -488,9 +522,9 @@ const HighlightLayer = memo(function HighlightLayer({ coords }: HighlightLayerPr
 
 function DrawingViewInner({
   floorData, lowerFloorData, results, onSleeveHover, onSleeveClick,
-  selectedSleeveId, layers, sleeveFilters, colorMode, navigateTarget, onNavigated, highlightCoords,
+  selectedSleeveId, layers, sleeveFilters, navigateTarget, onNavigated, highlightCoords,
   pdfOverlayUrl, pdfOverlayOpacity = 0.4,
-  onToggleLayer, onToggleSleeveFilter, onColorModeChange, sleeveCounts,
+  onToggleLayer, onToggleSleeveFilter, sleeveCounts,
   showLowerWallToggle, lowerFloorLabel, onPdfFilesSelected, onPdfClear, onPdfOpacityChange,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -678,8 +712,10 @@ function DrawingViewInner({
     ["step", "スラブ段差"],
     ["recess", "床ヌスミ"],
     ["column", "柱・仕上"],
+    ["beam", "梁"],
     ["dim", "寸法"],
     ["slabLevel", "スラブレベル"],
+    ["flZone", "FLゾーン"],
     ["room", "部屋名"],
     ["sleeve", "スリーブ"],
   ];
@@ -740,45 +776,32 @@ function DrawingViewInner({
           </>
         )}
 
-        <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
-        <span style={{ color: "#9ca3af", fontSize: 10 }}>色分け</span>
-        <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 5, padding: 2, gap: 1 }}>
-          {([["severity", "判定"], ["fl", "FL高さ"], ["discipline", "設備"]] as const).map(([mode, label]) => (
-            <button key={mode} onClick={() => onColorModeChange(mode)}
-              style={{
-                padding: "2px 10px", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 10,
-                fontWeight: colorMode === mode ? 500 : 400,
-                background: colorMode === mode ? "#fff" : "transparent",
-                color: colorMode === mode ? "#111827" : "#9ca3af",
-                boxShadow: colorMode === mode ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
-              }}>{label}</button>
-          ))}
-        </div>
+        {/* Judgement legend — always shown when the sleeve layer is on */}
+        {layers.sleeve && (
+          <>
+            <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
+            <div style={{ display: "flex", gap: 8, fontSize: 10, alignItems: "center" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />NG</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#d97706", display: "inline-block" }} />WARN</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16a34a", display: "inline-block" }} />OK</span>
+            </div>
+          </>
+        )}
 
-        {/* Mode-specific legends */}
-        {colorMode === "severity" && (
-          <div style={{ display: "flex", gap: 8, fontSize: 10, alignItems: "center", marginLeft: 4 }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />NG</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#d97706", display: "inline-block" }} />WARN</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#16a34a", display: "inline-block" }} />OK</span>
-          </div>
-        )}
-        {colorMode === "discipline" && (
-          <div style={{ display: "flex", gap: 8, fontSize: 10, alignItems: "center", marginLeft: 4 }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />衛生</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />空調</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />電気</span>
-          </div>
-        )}
-        {colorMode === "fl" && flLegend.length > 0 && (
-          <div style={{ display: "flex", gap: 8, fontSize: 10, alignItems: "center", marginLeft: 4, flexWrap: "wrap" }}>
-            {flLegend.map(({ label, color }) => (
-              <span key={label} style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, display: "inline-block" }} />
-                {label}
-              </span>
-            ))}
-          </div>
+        {/* FL-zone legend — shown when the FL-zone tiling layer is on */}
+        {layers.flZone && flLegend.length > 0 && (
+          <>
+            <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
+            <span style={{ color: "#9ca3af", fontSize: 10 }}>FL</span>
+            <div style={{ display: "flex", gap: 8, fontSize: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {flLegend.map(({ label, color }) => (
+                <span key={label} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, display: "inline-block" }} />
+                  {label}
+                </span>
+              ))}
+            </div>
+          </>
         )}
 
         <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
@@ -847,13 +870,12 @@ function DrawingViewInner({
           lowerFloorData={lowerFloorData}
           layers={layers}
           dataBounds={dataBounds}
+          flColorMap={flColorMap}
         />
         <SleeveLayer
           sleeves={floorData.sleeves}
           sleeveFilters={sleeveFilters}
-          colorMode={colorMode}
           severityMap={severityMap}
-          flColorMap={flColorMap}
           selectedSleeveId={selectedSleeveId}
           onSleeveHover={onSleeveHover}
           onSleeveClick={onSleeveClick}

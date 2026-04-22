@@ -28,7 +28,6 @@ async function pdfFileToDataUrl(file: File): Promise<string> {
 }
 
 type ViewMode = "drawing" | "list" | "data";
-type ColorMode = "severity" | "fl" | "discipline";
 
 interface FloorEntry {
   id: string;
@@ -68,7 +67,6 @@ function App() {
   const [floors, setFloors] = useState<FloorEntry[]>([]);
   const [activeFloorIdx, setActiveFloorIdx] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const [colorMode, setColorMode] = useState<ColorMode>("severity");
   const [loading, setLoading] = useState(false);
   const [hoveredSleeve, setHoveredSleeve] = useState<Sleeve | null>(null);
   const [selectedSleeve, setSelectedSleeve] = useState<Sleeve | null>(null);
@@ -77,7 +75,7 @@ function App() {
   const [highlightCoords, setHighlightCoords] = useState<[number, number][]>([]);
   const [openChecks, setOpenChecks] = useState<Set<number>>(new Set());
   const [layers, setLayers] = useState({
-    grid: true, wall: true, outerWall: true, step: true, recess: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false, raw: false, room: true,
+    grid: true, wall: true, outerWall: true, step: true, recess: true, column: true, beam: false, sleeve: true, dim: false, lowerWall: false, slabLevel: false, flZone: false, raw: false, room: true,
   });
   const [sleeveFilters, setSleeveFilters] = useState({
     衛生: true, 空調: true, 電気: true, その他: true,
@@ -244,6 +242,35 @@ function App() {
 
   const hasData = floors.some((f) => f.data !== null);
 
+  // Sleeve number search — jump to the sleeve whose P-N number matches the
+  // query. Accepts "12", "P-N-12", "P-N12", "pn-12" etc.
+  const [sleeveSearch, setSleeveSearch] = useState("");
+  const [sleeveSearchError, setSleeveSearchError] = useState(false);
+  const handleSleeveSearch = (raw: string) => {
+    if (!floorData) return;
+    const q = raw.trim();
+    if (!q) return;
+    // Extract trailing digits
+    const m = q.match(/(\d+)\s*$/);
+    if (!m) {
+      setSleeveSearchError(true);
+      return;
+    }
+    const wanted = `P-N-${parseInt(m[1], 10)}`;
+    const sleeve = floorData.sleeves.find(
+      (s) => (s.pn_number || "").trim().toUpperCase() === wanted.toUpperCase()
+    );
+    if (!sleeve) {
+      setSleeveSearchError(true);
+      return;
+    }
+    setSleeveSearchError(false);
+    setViewMode("drawing");
+    setNavigateTarget([sleeve.center[0], sleeve.center[1]]);
+    setHighlightCoords([]);
+    setSelectedSleeve(sleeve);
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#f8fafc", color: "#111827", fontFamily: "'Inter', 'Noto Sans JP', -apple-system, sans-serif" }}>
       {/* Row 1: Header */}
@@ -273,6 +300,29 @@ function App() {
             }}>
             {loading ? "解析中..." : hasData ? "再チェック" : "チェック実行"}
           </button>
+        )}
+
+        {hasData && floorData && (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 12 }}>
+            <input
+              type="text"
+              value={sleeveSearch}
+              onChange={(e) => { setSleeveSearch(e.target.value); setSleeveSearchError(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSleeveSearch(sleeveSearch); }}
+              placeholder="P-N番号で検索 (例 12)"
+              style={{
+                padding: "5px 10px", fontSize: 12, width: 160,
+                border: `1px solid ${sleeveSearchError ? "#dc2626" : "#d1d5db"}`,
+                borderRadius: 6, outline: "none",
+                background: sleeveSearchError ? "#fef2f2" : "#fff",
+              }}
+            />
+            <button onClick={() => handleSleeveSearch(sleeveSearch)}
+              style={{
+                padding: "5px 10px", fontSize: 12, background: "#fff", color: "#374151",
+                border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+              }}>飛ぶ</button>
+          </div>
         )}
 
         {hasData && (
@@ -490,7 +540,6 @@ function App() {
                   selectedSleeveId={selectedSleeve?.id || null}
                   layers={layers}
                   sleeveFilters={sleeveFilters}
-                  colorMode={colorMode}
                   navigateTarget={navigateTarget}
                   onNavigated={handleNavigated}
                   highlightCoords={highlightCoords}
@@ -498,7 +547,6 @@ function App() {
                   pdfOverlayOpacity={pdfOverlayOpacity}
                   onToggleLayer={(key) => toggleLayer(key as keyof typeof layers)}
                   onToggleSleeveFilter={(key) => toggleSleeveFilter(key)}
-                  onColorModeChange={setColorMode}
                   sleeveCounts={sleeveCounts}
                   showLowerWallToggle={lowerFloor !== null}
                   lowerFloorLabel={lowerFloor ? floorLevelLabel(lowerFloor.id) : ""}
