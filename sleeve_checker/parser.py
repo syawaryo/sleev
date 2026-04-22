@@ -898,28 +898,27 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
 # ---------------------------------------------------------------------------
 
 def _extract_step_lines(doc, msp) -> list[StepLine]:
-    """
-    Extract slab step (段差) and recess (床ヌスミ) lines.
+    """Extract RC slab step lines (F108_3_RCスラブ段差線).
 
-    Relevant layer keywords:
-    - ``F108_3_RCスラブ段差線``  — slab level-change boundaries
-    - ``F108_5_床ヌスミ``        — floor recess boundaries
+    床ヌスミ (F108_5) is intentionally excluded and handled separately by
+    :func:`_extract_recess_polygons` — it represents localised floor
+    recesses with a distinct visual meaning.
+
+    Small closed polylines (bounding-box diagonal < 500 mm) are
+    step-direction arrow symbols, not step boundaries, and are filtered out.
     """
     step_keywords = [
         "F108_3_RCスラブ段差線",
-        "F108_5_床ヌスミ",
-        # Fallback — catch non-standard naming
         "段差線",
-        "床ヌスミ",
         "スラブ段差",
     ]
-    step_layers = _find_layers_any(doc, step_keywords)
+    step_layers = set(_find_layers_any(doc, step_keywords))
 
     step_lines: list[StepLine] = []
 
     for entity in msp:
         layer = entity.dxf.layer
-        if layer not in set(step_layers):
+        if layer not in step_layers:
             continue
 
         if entity.dxftype() == "LINE":
@@ -929,16 +928,51 @@ def _extract_step_lines(doc, msp) -> list[StepLine]:
                 step_lines.append(StepLine(start=(sx, sy), end=(ex, ey), layer=layer))
 
         elif entity.dxftype() == "LWPOLYLINE":
-            pts = list(entity.get_points())
+            pts = [(float(p[0]), float(p[1])) for p in entity.get_points()]
+            if len(pts) < 2:
+                continue
+            if entity.closed and len(pts) >= 3:
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+                diag2 = (max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2
+                if diag2 < 500.0 ** 2:
+                    continue
             for i in range(len(pts) - 1):
-                sx, sy = float(pts[i][0]), float(pts[i][1])
-                ex, ey = float(pts[i + 1][0]), float(pts[i + 1][1])
+                sx, sy = pts[i]
+                ex, ey = pts[i + 1]
                 if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
                     step_lines.append(
                         StepLine(start=(sx, sy), end=(ex, ey), layer=layer)
                     )
 
     return step_lines
+
+
+def _extract_recess_polygons(doc, msp):
+    """Extract 床ヌスミ (floor-recess) outlines as closed polygons (F108_5).
+
+    Open line entities on this layer are ignored by design — a recess is
+    conceptually a bounded area, so only closed polylines are meaningful.
+    """
+    from .models import RecessPolygon
+    keywords = ["F108_5_床ヌスミ", "床ヌスミ"]
+    layers = set(_find_layers_any(doc, keywords))
+
+    polys: list[RecessPolygon] = []
+    for entity in msp:
+        if entity.dxf.layer not in layers:
+            continue
+        if entity.dxftype() != "LWPOLYLINE" or not entity.closed:
+            continue
+        pts = [(float(p[0]), float(p[1])) for p in entity.get_points()]
+        if len(pts) < 3:
+            continue
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        if not _in_building_range(cx, cy):
+            continue
+        polys.append(RecessPolygon(vertices=pts, layer=entity.dxf.layer))
+    return polys
 
 
 # ---------------------------------------------------------------------------
@@ -953,7 +987,9 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
     col_keywords = [
         "F102_RC柱", "F101_RC柱",
         "F201_Ｓ柱", "F201_S柱",
-        "A412_柱",
+        "A412_柱", "A411_柱", "A511_柱",
+        "F204_鉄骨間柱",
+        "間柱",  # door-jamb / elevator-frame stud columns
         "A521_壁：仕上", "A521_壁:仕上",
         # Fallback — catch non-standard naming
         "_柱",
@@ -965,6 +1001,11 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
 
     col_lines: list[ColumnLine] = []
 
+    # ARC approximation: S柱 profiles and elevator frame arcs are stored as
+    # ARCs in DXF. Convert each ARC into a polyline of short segments so the
+    # rounded portions render through the existing ColumnLine path.
+    _ARC_SEGMENTS = 16
+
     for entity in msp:
         layer = entity.dxf.layer
         if layer not in set(col_layers):
@@ -973,25 +1014,45 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
         if entity.dxftype() == "LINE":
             sx, sy = entity.dxf.start.x, entity.dxf.start.y
             ex, ey = entity.dxf.end.x, entity.dxf.end.y
-            if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
-                col_lines.append(ColumnLine(start=(sx, sy), end=(ex, ey), layer=layer))
+            col_lines.append(ColumnLine(start=(sx, sy), end=(ex, ey), layer=layer))
 
         elif entity.dxftype() == "LWPOLYLINE":
             pts = list(entity.get_points())
             for i in range(len(pts) - 1):
                 sx, sy = float(pts[i][0]), float(pts[i][1])
                 ex, ey = float(pts[i + 1][0]), float(pts[i + 1][1])
-                if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
-                    col_lines.append(
-                        ColumnLine(start=(sx, sy), end=(ex, ey), layer=layer)
-                    )
+                col_lines.append(
+                    ColumnLine(start=(sx, sy), end=(ex, ey), layer=layer)
+                )
             if entity.is_closed and len(pts) >= 2:
                 sx, sy = float(pts[-1][0]), float(pts[-1][1])
                 ex, ey = float(pts[0][0]), float(pts[0][1])
-                if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
-                    col_lines.append(
-                        ColumnLine(start=(sx, sy), end=(ex, ey), layer=layer)
-                    )
+                col_lines.append(
+                    ColumnLine(start=(sx, sy), end=(ex, ey), layer=layer)
+                )
+
+        elif entity.dxftype() == "ARC":
+            try:
+                cx = float(entity.dxf.center.x)
+                cy = float(entity.dxf.center.y)
+                r = float(entity.dxf.radius)
+                sa = math.radians(float(entity.dxf.start_angle))
+                ea = math.radians(float(entity.dxf.end_angle))
+            except Exception:
+                continue
+            if ea < sa:
+                ea += 2.0 * math.pi
+            step = (ea - sa) / _ARC_SEGMENTS
+            prev_x = cx + r * math.cos(sa)
+            prev_y = cy + r * math.sin(sa)
+            for i in range(1, _ARC_SEGMENTS + 1):
+                a = sa + step * i
+                nx = cx + r * math.cos(a)
+                ny = cy + r * math.sin(a)
+                col_lines.append(
+                    ColumnLine(start=(prev_x, prev_y), end=(nx, ny), layer=layer)
+                )
+                prev_x, prev_y = nx, ny
 
     return col_lines
 
@@ -2038,6 +2099,17 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     slab_level = _extract_slab_level(doc, msp)
     water_gradients = _extract_water_gradients(doc, msp)
     has_base_level_def = _detect_base_level_def(doc)
+    recess_polygons = _extract_recess_polygons(doc, msp)
+
+    # FL-based classification of step lines: annotate each segment with the
+    # FL value of the region on each side. Spurious lines (same FL both
+    # sides) can then be hidden by the frontend to match what a design
+    # reviewer expects to see.
+    from .regions import classify_step_segments
+    for cls in classify_step_segments(step_lines, slab_zones):
+        cls.segment.side_a_fl = cls.side_a_fl
+        cls.segment.side_b_fl = cls.side_b_fl
+        cls.segment.fl_status = cls.status
 
     return FloorData(
         sleeves=sleeves,
@@ -2048,6 +2120,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         dim_lines=dim_lines,
         slab_zones=slab_zones,
         slab_outlines=slab_outlines,
+        recess_polygons=recess_polygons,
         slab_labels=slab_labels,
         pn_labels=pn_labels,
         water_gradients=water_gradients,
