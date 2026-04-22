@@ -334,16 +334,23 @@ const SleeveLayer = memo(function SleeveLayer({
         const colors = getSleeveColors(s, colorMode, severityMap);
         const isSelected = s.id === selectedSleeveId;
         const isRect = s.shape === "rect";
-        const halfW = Math.max((s.width ?? s.diameter) / 2, 200);
-        const halfH = Math.max((s.height ?? s.diameter) / 2, 200);
-        const r = Math.max(s.diameter / 2, 200);
+        // Render at the drawing's true dimensions. Previously we clamped
+        // everything to 200 mm half-size for click ergonomics, which blew
+        // up small φ60 / φ124 pipes into giant blobs. The hit area below
+        // is still padded so small sleeves remain clickable.
+        const halfW = (s.width ?? s.diameter) / 2;
+        const halfH = (s.height ?? s.diameter) / 2;
+        const r = s.diameter / 2;
+        // Hit area: always at least 300 mm half-size so even φ60 stays
+        // clickable. Drawn transparently, does not affect the visible glyph.
+        const hitR = Math.max(Math.max(halfW, halfH, r) * 1.8, 300);
         const cx = s.center[0];
         const cy = s.center[1];
         return (
           <g key={s.id} style={{ cursor: "pointer" }}
             onMouseEnter={(e) => { e.stopPropagation(); onSleeveHover(s); }}
             onClick={(e) => { e.stopPropagation(); onSleeveClick(s); }}>
-            <circle cx={cx} cy={cy} r={Math.max(halfW, halfH) * 1.8} fill="transparent" stroke="none" />
+            <circle cx={cx} cy={cy} r={hitR} fill="transparent" stroke="none" />
             {isSelected && (
               <>
                 <circle cx={cx} cy={cy} r={r + 200}
