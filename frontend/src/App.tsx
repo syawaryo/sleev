@@ -82,12 +82,12 @@ function App() {
   });
   const toggleSleeveFilter = (key: keyof typeof sleeveFilters) =>
     setSleeveFilters((p) => ({ ...p, [key]: !p[key] }));
-  const [ifcModalOpen, setIfcModalOpen] = useState(false);
-  const [ifcFiles, setIfcFiles] = useState<File[]>([]);
+  // Unified upload modal (.dxf / .dwg / .ifc).
+  // Extension-based routing decides which backend endpoint each file goes to.
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [dwgConverting, setDwgConverting] = useState(false);
-  const [dwgError, setDwgError] = useState<string | null>(null);
-  const [drawingModalOpen, setDrawingModalOpen] = useState(false);
-  const [drawingFile, setDrawingFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [pdfOverlayUrl, setPdfOverlayUrl] = useState<string | null>(null);
   const [pdfOverlayOpacity, setPdfOverlayOpacity] = useState(0.4);
   const handleUploadPdf = async (files: FileList | null) => {
@@ -142,61 +142,57 @@ function App() {
     }).catch(() => {});
   }, []);
 
-  const handleIfcSubmit = async () => {
-    if (ifcFiles.length === 0) return;
+  const handleUploadSubmit = async () => {
+    if (uploadFiles.length === 0) return;
+    setUploadError(null);
     setLoading(true);
     try {
-      const res = await uploadIfc(ifcFiles, "");
-      setFloors((prev) => {
-        const entry: FloorEntry = { id: res.id, label: res.name, source: "ifc", data: null, results: [] };
-        const exists = prev.findIndex((f) => f.id === res.id);
-        if (exists >= 0) {
-          const next = [...prev];
-          next[exists] = entry;
-          return next;
-        }
-        return [...prev, entry];
-      });
-      setIfcModalOpen(false);
-      setIfcFiles([]);
-    } catch (e) {
-      console.error(e);
-    }
-    setLoading(false);
-  };
-
-  const handleDrawingSubmit = async () => {
-    if (!drawingFile) return;
-    const ext = drawingFile.name.split(".").pop()?.toLowerCase();
-    setDwgError(null);
-    setLoading(true);
-    try {
-      let res: { id: string; name: string };
-      if (ext === "dwg") {
-        setDwgConverting(true);
-        res = await uploadDwg(drawingFile, "");
-        setDwgConverting(false);
-      } else if (ext === "dxf") {
-        res = await uploadDxf(drawingFile, "");
-      } else {
-        throw new Error("対応形式は .dxf または .dwg です");
+      // Group by extension. IFC is batched together (multiple files can be
+      // one logical upload). DXF/DWG each become their own floor entry.
+      const ifc: File[] = [];
+      const dxfs: File[] = [];
+      const dwgs: File[] = [];
+      for (const f of uploadFiles) {
+        const ext = f.name.split(".").pop()?.toLowerCase();
+        if (ext === "ifc") ifc.push(f);
+        else if (ext === "dxf") dxfs.push(f);
+        else if (ext === "dwg") dwgs.push(f);
+        else throw new Error(`対応していない拡張子: ${f.name}`);
       }
-      const source: "dxf" | "dwg" = ext === "dwg" ? "dwg" : "dxf";
-      setFloors((prev) => {
-        const entry: FloorEntry = { id: res.id, label: res.name, source, data: null, results: [] };
-        const exists = prev.findIndex((f) => f.id === res.id);
-        if (exists >= 0) {
-          const next = [...prev];
-          next[exists] = entry;
-          return next;
-        }
-        return [...prev, entry];
-      });
-      setDrawingModalOpen(false);
-      setDrawingFile(null);
+
+      const addEntry = (id: string, name: string, source: FloorEntry["source"]) => {
+        setFloors((prev) => {
+          const entry: FloorEntry = { id, label: name, source, data: null, results: [] };
+          const exists = prev.findIndex((f) => f.id === id);
+          if (exists >= 0) {
+            const next = [...prev];
+            next[exists] = entry;
+            return next;
+          }
+          return [...prev, entry];
+        });
+      };
+
+      if (ifc.length > 0) {
+        const res = await uploadIfc(ifc, "");
+        addEntry(res.id, res.name, "ifc");
+      }
+      for (const f of dxfs) {
+        const res = await uploadDxf(f, "");
+        addEntry(res.id, res.name, "dxf");
+      }
+      for (const f of dwgs) {
+        setDwgConverting(true);
+        const res = await uploadDwg(f, "");
+        setDwgConverting(false);
+        addEntry(res.id, res.name, "dwg");
+      }
+
+      setUploadModalOpen(false);
+      setUploadFiles([]);
     } catch (e: any) {
       const detail = e?.response?.data?.detail ?? e?.message ?? "アップロードに失敗しました";
-      setDwgError(String(detail));
+      setUploadError(String(detail));
       setDwgConverting(false);
       console.error(e);
     }
@@ -373,19 +369,15 @@ function App() {
           </div>
         )}
 
-        <button onClick={() => setDrawingModalOpen(true)} disabled={loading}
+        <button onClick={() => setUploadModalOpen(true)} disabled={loading}
           style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}>
-          {dwgConverting ? "DWG変換中..." : "+ 図面を追加"}
-        </button>
-        <button onClick={() => setIfcModalOpen(true)} disabled={loading}
-          style={{ padding: "3px 12px", fontSize: 11, background: "#fff", border: "1px dashed #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}>
-          + IFCを追加
+          {dwgConverting ? "DWG変換中..." : "+ ファイルを追加"}
         </button>
 
       </div>
 
-      {/* DWG conversion error toast */}
-      {dwgError && (
+      {/* Upload error toast */}
+      {uploadError && (
         <div style={{
           position: "fixed", bottom: 24, right: 24, zIndex: 120, maxWidth: 420,
           background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8,
@@ -394,20 +386,20 @@ function App() {
           <div style={{ display: "flex", alignItems: "start", gap: 10 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", marginBottom: 4 }}>
-                DWG変換エラー
+                アップロードエラー
               </div>
-              <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.5 }}>{dwgError}</div>
+              <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.5 }}>{uploadError}</div>
             </div>
-            <button onClick={() => setDwgError(null)}
+            <button onClick={() => setUploadError(null)}
               style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>x</button>
           </div>
         </div>
       )}
 
-      {/* Drawing (DXF/DWG) upload modal */}
-      {drawingModalOpen && (
+      {/* Unified upload modal — .dxf / .dwg / .ifc */}
+      {uploadModalOpen && (
         <div
-          onClick={() => !loading && setDrawingModalOpen(false)}
+          onClick={() => !loading && setUploadModalOpen(false)}
           style={{
             position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
             zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
@@ -415,68 +407,19 @@ function App() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ background: "#fff", borderRadius: 10, padding: 24, width: 460, boxShadow: "0 10px 40px rgba(0,0,0,0.15)" }}
+            style={{ background: "#fff", borderRadius: 10, padding: 24, width: 480, boxShadow: "0 10px 40px rgba(0,0,0,0.15)" }}
           >
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>図面をアップロード</div>
-            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 18 }}>
-              .dxf または .dwg ファイルを指定してください。DWGはサーバー側で自動的にDXFに変換します（数秒〜数十秒）。
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 14 }}>
+              ファイルをアップロード（DWG / IFC / DXF 対応）
             </div>
 
             <div style={{ marginBottom: 20 }}>
-              <input type="file" accept=".dxf,.dwg"
-                onChange={(e) => setDrawingFile(e.target.files?.[0] ?? null)}
+              <input type="file" accept=".dxf,.dwg,.ifc" multiple
+                onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
                 style={{ fontSize: 12, width: "100%" }} />
-              {drawingFile && (
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>{drawingFile.name}</div>
-              )}
-            </div>
-
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button
-                onClick={() => { if (!loading) { setDrawingModalOpen(false); setDrawingFile(null); } }}
-                disabled={loading}
-                style={{ padding: "6px 16px", fontSize: 12, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}
-              >キャンセル</button>
-              <button
-                onClick={handleDrawingSubmit}
-                disabled={!drawingFile || loading}
-                style={{
-                  padding: "6px 16px", fontSize: 12, border: "none", borderRadius: 6,
-                  background: (!drawingFile || loading) ? "#d1d5db" : "#ff4b4b",
-                  color: "#fff", cursor: (!drawingFile || loading) ? "default" : "pointer",
-                  fontWeight: 500,
-                }}
-              >{dwgConverting ? "DWG変換中..." : loading ? "アップロード中..." : "登録"}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* IFC upload modal */}
-      {ifcModalOpen && (
-        <div
-          onClick={() => !loading && setIfcModalOpen(false)}
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
-            zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center",
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ background: "#fff", borderRadius: 10, padding: 24, width: 460, boxShadow: "0 10px 40px rgba(0,0,0,0.15)" }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>IFCをアップロード</div>
-            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 18 }}>
-              IFCファイルを1つ以上選択してください（複数選択可）。躯体・設備の区別は不要で、パーサが自動で使い分けます。
-            </div>
-
-            <div style={{ marginBottom: 20 }}>
-              <input type="file" accept=".ifc" multiple
-                onChange={(e) => setIfcFiles(Array.from(e.target.files || []))}
-                style={{ fontSize: 12, width: "100%" }} />
-              {ifcFiles.length > 0 && (
+              {uploadFiles.length > 0 && (
                 <ul style={{ fontSize: 11, color: "#6b7280", marginTop: 8, paddingLeft: 16, listStyle: "disc" }}>
-                  {ifcFiles.map((f, i) => (
+                  {uploadFiles.map((f, i) => (
                     <li key={i}>{f.name}</li>
                   ))}
                 </ul>
@@ -485,20 +428,20 @@ function App() {
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button
-                onClick={() => { if (!loading) { setIfcModalOpen(false); setIfcFiles([]); } }}
+                onClick={() => { if (!loading) { setUploadModalOpen(false); setUploadFiles([]); } }}
                 disabled={loading}
                 style={{ padding: "6px 16px", fontSize: 12, background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, color: "#6b7280", cursor: "pointer" }}
               >キャンセル</button>
               <button
-                onClick={handleIfcSubmit}
-                disabled={ifcFiles.length === 0 || loading}
+                onClick={handleUploadSubmit}
+                disabled={uploadFiles.length === 0 || loading}
                 style={{
                   padding: "6px 16px", fontSize: 12, border: "none", borderRadius: 6,
-                  background: (ifcFiles.length === 0 || loading) ? "#d1d5db" : "#ff4b4b",
-                  color: "#fff", cursor: (ifcFiles.length === 0 || loading) ? "default" : "pointer",
+                  background: (uploadFiles.length === 0 || loading) ? "#d1d5db" : "#ff4b4b",
+                  color: "#fff", cursor: (uploadFiles.length === 0 || loading) ? "default" : "pointer",
                   fontWeight: 500,
                 }}
-              >{loading ? "アップロード中..." : "登録"}</button>
+              >{dwgConverting ? "DWG変換中..." : loading ? "アップロード中..." : "登録"}</button>
             </div>
           </div>
         </div>
@@ -508,23 +451,14 @@ function App() {
       <div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
         {floors.length === 0 ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, color: "#9ca3af" }}>
-            <div style={{ fontSize: 14 }}>図面 (DXF/DWG) または IFC を追加してください</div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setDrawingModalOpen(true)}
-                style={{
-                  padding: "10px 24px", fontSize: 13, background: "#fff", border: "2px dashed #d1d5db",
-                  borderRadius: 8, color: "#6b7280", cursor: "pointer",
-                }}>
-                + 図面を追加
-              </button>
-              <button onClick={() => setIfcModalOpen(true)}
-                style={{
-                  padding: "10px 24px", fontSize: 13, background: "#fff", border: "2px dashed #d1d5db",
-                  borderRadius: 8, color: "#6b7280", cursor: "pointer",
-                }}>
-                + IFCを追加
-              </button>
-            </div>
+            <div style={{ fontSize: 14 }}>DXF / DWG / IFC ファイルを追加してください</div>
+            <button onClick={() => setUploadModalOpen(true)}
+              style={{
+                padding: "10px 24px", fontSize: 13, background: "#fff", border: "2px dashed #d1d5db",
+                borderRadius: 8, color: "#6b7280", cursor: "pointer",
+              }}>
+              + ファイルを追加
+            </button>
           </div>
         ) : viewMode === "drawing" ? (
           <>
