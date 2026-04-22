@@ -284,6 +284,37 @@ def _extract_grids(f) -> list[GridLine]:
     return out
 
 
+def _grid_bounds(grid_lines: list[GridLine]) -> tuple[float, float, float, float] | None:
+    """Return (min_x, max_x, min_y, max_y) of all V/H grid positions, or None."""
+    v_pos = [g.position for g in grid_lines if g.direction == "V"]
+    h_pos = [g.position for g in grid_lines if g.direction == "H"]
+    if not v_pos or not h_pos:
+        return None
+    return (min(v_pos), max(v_pos), min(h_pos), max(h_pos))
+
+
+def _within_building_area(center: tuple[float, float], grid_lines: list[GridLine]) -> bool:
+    """True if `center` lies within 1.5× the grid extent around the grid centre.
+
+    Tfas IFCs include sleeves for detail/enlarged views placed far outside the
+    main building footprint (typically at the drawing's upper corners). Those
+    sleeves duplicate real sleeves and confuse per-floor counts / checks. The
+    1.5× band keeps perimeter elements while rejecting the detail-view clones.
+    """
+    b = _grid_bounds(grid_lines)
+    if b is None:
+        return True  # no grid → don't filter
+    min_x, max_x, min_y, max_y = b
+    span_x = (max_x - min_x) or 1.0
+    span_y = (max_y - min_y) or 1.0
+    cx = (min_x + max_x) / 2.0
+    cy = (min_y + max_y) / 2.0
+    return (
+        abs(center[0] - cx) <= span_x * 0.75
+        and abs(center[1] - cy) <= span_y * 0.75
+    )
+
+
 # ---------------------------------------------------------------------------
 # Synthesis: translate IFC geometry into the DXF-notation fields checks.py
 # expects, BUT only when IFC actually carries the underlying fact. If the IFC
@@ -350,8 +381,12 @@ def parse_ifc(sleeve_path: str | Path, structure_path: str | Path | None = None)
 
     sleeve_f = ifcopenshell.open(str(sp))
 
-    sleeves = _extract_sleeves(sleeve_f)
     grid_lines = _extract_grids(sleeve_f)
+    sleeves = _extract_sleeves(sleeve_f)
+    # Drop sleeves placed in enlarged-detail areas (outside 1.5× grid extent).
+    # These are drafting duplicates of real sleeves rendered in the sheet's
+    # corner mini-maps; filtering them brings IFC counts in line with DXF.
+    sleeves = [s for s in sleeves if _within_building_area(s.center, grid_lines)]
 
     # Phase 2 hook — structural IFC. Intentionally left empty for now.
     if structure_path is not None:
