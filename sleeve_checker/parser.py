@@ -120,8 +120,14 @@ def _refine_sleeve_shape_from_label(sleeve: Sleeve) -> None:
     sometimes drawn as a hatched rectangle in plan view (no CIRCLE entity
     inside the block), which our geometry pass tags as "rect". The label
     text is a more authoritative signal than the hatching rectangle.
+
+    EXCEPTION: blocks named 箱 (= "box") are angular sleeves by construction.
+    The round pipe that passes THROUGH a box sleeve doesn't make the hole
+    round — the hole is a rectangle sized for the box. Keep rect.
     """
     if sleeve.shape == "round":
+        return
+    if "箱" in sleeve.id:
         return
     lt = sleeve.label_text or ""
     dt = sleeve.diameter_text or ""
@@ -517,7 +523,13 @@ def _extract_sleeves(doc, msp) -> list[Sleeve]:
         ins_color = _resolve_entity_color(doc, ins)
         circles = get_circles(block_name)
 
-        if circles:
+        # A block whose name contains 箱 (= "box") is a rectangular sleeve by
+        # definition, even if it embeds a CIRCLE inside (drafters draw a small
+        # circle to indicate the pipe cross-section within the box). Force the
+        # rect path so these don't slip through as round.
+        is_box_block = "箱" in block_name
+
+        if circles and not is_box_block:
             # --- Pattern 1 & 2: CIRCLE-based sleeves ---
             for ox, oy, diameter in circles:
                 # Apply scale then rotation
