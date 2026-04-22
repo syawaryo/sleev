@@ -352,21 +352,15 @@ def _segment_in_building_bbox(
 
 
 def _in_building_range(x: float, y: float) -> bool:
-    """Loose building-extent check used by the sleeve paths.
+    """Strict building-extent check — alias for _point_in_building_bbox.
 
-    Previously this was hardwired to always-True because the original
-    BLDG_* bounds dropped legitimate outer-perimeter walls and dim labels.
-    For sleeves the problem is the opposite: the sheet carries detail
-    drawings at y ≈ 90k–100k that are not real floor penetrations. We
-    therefore use a GENEROUS bounding box (2× the expected building
-    footprint) that filters only the obvious out-of-scope entries at the
-    drawing margins, while still admitting perimeter elements. Wall /
-    grid / slab extractors already bypass this function where needed.
+    Historically this was 2× the bbox to admit perimeter elements, but
+    wall / slab / column extractors now all apply the strict ±2 m
+    tolerance at their return statements, and the 2× version was letting
+    sleeves / water gradients / PN labels through at 90 k coordinates
+    (legend-panel position).
     """
-    return (
-        -0.5 * BLDG_X_MAX <= x <= 1.5 * BLDG_X_MAX
-        and -0.5 * BLDG_Y_MAX <= y <= 1.5 * BLDG_Y_MAX
-    )
+    return _point_in_building_bbox(x, y)
 
 
 def _resolve_entity_color(doc, entity) -> int | None:
@@ -937,8 +931,14 @@ def _extract_step_lines(doc, msp) -> list[StepLine]:
     :func:`_extract_recess_polygons` — it represents localised floor
     recesses with a distinct visual meaning.
 
-    Small closed polylines (bounding-box diagonal < 500 mm) are
-    step-direction arrow symbols, not step boundaries, and are filtered out.
+    Two kinds of artefacts frequently appear on this layer and are filtered:
+
+    - Small closed polylines (bounding-box diagonal < 500 mm) are
+      step-direction arrow symbols, not step boundaries.
+    - Very long straight segments (> 15 m) are building-perimeter / slab-edge
+      lines that some drafters place on the step layer; they form the
+      building outline, not a boundary between FL regions. Typical step
+      segments in these sample drawings average 2–3 m.
     """
     step_keywords = [
         "F108_3_RCスラブ段差線",
@@ -946,6 +946,12 @@ def _extract_step_lines(doc, msp) -> list[StepLine]:
         "スラブ段差",
     ]
     step_layers = set(_find_layers_any(doc, step_keywords))
+
+    MAX_STEP_SEG_LEN_SQ = 15000.0 ** 2  # mm^2
+
+    def _too_long(sx: float, sy: float, ex: float, ey: float) -> bool:
+        dx = ex - sx; dy = ey - sy
+        return (dx * dx + dy * dy) > MAX_STEP_SEG_LEN_SQ
 
     step_lines: list[StepLine] = []
 
@@ -957,6 +963,8 @@ def _extract_step_lines(doc, msp) -> list[StepLine]:
         if entity.dxftype() == "LINE":
             sx, sy = entity.dxf.start.x, entity.dxf.start.y
             ex, ey = entity.dxf.end.x, entity.dxf.end.y
+            if _too_long(sx, sy, ex, ey):
+                continue
             if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
                 step_lines.append(StepLine(start=(sx, sy), end=(ex, ey), layer=layer))
 
@@ -973,6 +981,8 @@ def _extract_step_lines(doc, msp) -> list[StepLine]:
             for i in range(len(pts) - 1):
                 sx, sy = pts[i]
                 ex, ey = pts[i + 1]
+                if _too_long(sx, sy, ex, ey):
+                    continue
                 if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
                     step_lines.append(
                         StepLine(start=(sx, sy), end=(ex, ey), layer=layer)
@@ -1907,7 +1917,7 @@ def _extract_step_labels(doc, msp) -> list[SlabZone]:
             raw = (entity.dxf.text or "").strip()
             pos = entity.dxf.insert
             x, y = float(pos.x), float(pos.y)
-            if not _in_building_range(x, y):
+            if not _point_in_building_bbox(x, y):
                 continue
 
             match = fl_pattern.search(raw)
@@ -2100,7 +2110,9 @@ def _extract_water_gradients(doc, msp) -> list:
                 direction = d
         results.append(WaterGradient(x=gx, y=gy, direction=direction))
 
-    return results
+    # Drop gradients that live outside the building bbox (detail sheets
+    # use the same A221 annotation layers at ±50 k coords).
+    return [w for w in results if _point_in_building_bbox(w.x, w.y)]
 
 
 # ---------------------------------------------------------------------------
