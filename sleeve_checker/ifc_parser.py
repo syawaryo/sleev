@@ -137,9 +137,21 @@ def _extract_sleeves(f) -> list[Sleeve]:
         layer = basic.get("layer") or ""
         discipline = _discipline_from_layer(layer)
 
-        # Late import keeps this module independent of parser.py until called.
-        from .parser import _classify_sleeve_type
-        sleeve_type = _classify_sleeve_type(label_text)
+        # For IFC the equipment code (EA/CW/…) is NOT in the geometry label —
+        # the figure_name is a generic "鋼製丸スリーブ" / "スリーブ箱". Instead,
+        # Tfas encodes the discipline in Pset_Tfas_SystemProperty_Basic.layer
+        # ("電気:スリーブ" / "空調:スリーブ" / "衛生:スリーブ"), which maps
+        # cleanly to our sleeve_type taxonomy.
+        #
+        #   衛生 → pipe   (given / drain / chilled-water plumbing)
+        #   空調 → duct   (HVAC / smoke-exhaust ducts)
+        #   電気 → cable  (cable rack / conduit)
+        #
+        # We refine with figure_type when it disagrees (rare in practice):
+        # figure_type "ﾀﾞｸﾄ･ﾗｯｸ" on a 電気 layer stays "cable" (it is a
+        # cable-rack penetration, not an HVAC duct).
+        _IFC_DISC_TO_TYPE = {"衛生": "pipe", "空調": "duct", "電気": "cable"}
+        sleeve_type = _IFC_DISC_TO_TYPE.get(discipline, "")
 
         sleeves.append(Sleeve(
             id=p.GlobalId,
