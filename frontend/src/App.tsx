@@ -1,9 +1,30 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import type { FloorData, Sleeve, CheckResult } from "./types";
 import { getFloors, parseFloor, runChecks, uploadDxf, uploadDwg, uploadIfc } from "./api";
 import DrawingView from "./components/DrawingView";
 import SleeveInfo from "./components/SleeveInfo";
 import ListView from "./components/ListView";
+import * as pdfjs from "pdfjs-dist";
+
+// Vite bundles the worker URL for us; pdf.js requires this or it falls back
+// to main-thread rendering that often fails in production builds.
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).href;
+
+async function pdfFileToDataUrl(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 2 });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d")!;
+  await page.render({ canvas, canvasContext: ctx, viewport } as any).promise;
+  return canvas.toDataURL("image/png");
+}
 
 type ViewMode = "drawing" | "list";
 type ColorMode = "severity" | "fl" | "discipline";
@@ -29,8 +50,13 @@ function App() {
   const [highlightCoords, setHighlightCoords] = useState<[number, number][]>([]);
   const [openChecks, setOpenChecks] = useState<Set<number>>(new Set());
   const [layers, setLayers] = useState({
-    grid: true, wall: true, step: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false,
+    grid: true, wall: true, outerWall: true, step: true, column: true, sleeve: true, dim: false, lowerWall: false, slabLevel: false,
   });
+  const [sleeveFilters, setSleeveFilters] = useState({
+    衛生: true, 空調: true, 電気: true, その他: true,
+  });
+  const toggleSleeveFilter = (key: keyof typeof sleeveFilters) =>
+    setSleeveFilters((p) => ({ ...p, [key]: !p[key] }));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dwgInputRef = useRef<HTMLInputElement>(null);
   const [ifcModalOpen, setIfcModalOpen] = useState(false);
@@ -38,9 +64,26 @@ function App() {
   const [ifcStructureFile, setIfcStructureFile] = useState<File | null>(null);
   const [dwgConverting, setDwgConverting] = useState(false);
   const [dwgError, setDwgError] = useState<string | null>(null);
+  const [pdfOverlayUrl, setPdfOverlayUrl] = useState<string | null>(null);
+  const [pdfOverlayOpacity, setPdfOverlayOpacity] = useState(0.4);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUploadPdf = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    try {
+      const url = await pdfFileToDataUrl(files[0]);
+      setPdfOverlayUrl(url);
+    } catch (e) {
+      console.error("PDF overlay failed:", e);
+    }
+    if (pdfInputRef.current) pdfInputRef.current.value = "";
+  };
 
   const toggleLayer = (key: keyof typeof layers) =>
     setLayers((p) => ({ ...p, [key]: !p[key] }));
+
+  // Stable callback so DrawingView's React.memo stays effective
+  const handleNavigated = useCallback(() => setNavigateTarget(null), []);
 
   const activeFloor: FloorEntry = floors[activeFloorIdx] || { id: "", label: "", source: "dxf", data: null, results: [] };
   const floorData = activeFloor.data;
@@ -49,6 +92,18 @@ function App() {
 
   // Find 1F data for wall interference overlay
   const floor1fData = floors.find((f) => f.id === "1f")?.data ?? null;
+
+  // Sleeve counts per discipline (for filter badges)
+  const sleeveCounts = (() => {
+    const counts = { 衛生: 0, 空調: 0, 電気: 0, その他: 0 };
+    if (!floorData) return counts;
+    for (const s of floorData.sleeves) {
+      const d = s.discipline as keyof typeof counts;
+      if (d in counts) counts[d]++;
+      else counts["その他"]++;
+    }
+    return counts;
+  })();
 
   // Load existing floors on mount
   useEffect(() => {
@@ -205,7 +260,7 @@ function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#f8fafc", color: "#111827", fontFamily: "'Inter', 'Noto Sans JP', -apple-system, sans-serif" }}>
       {/* Row 1: Header */}
-      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "10px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+      <div className="no-print" style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "10px 20px", display: "flex", alignItems: "center", gap: 12 }}>
         <span style={{ fontSize: 16, fontWeight: 700, color: "#111827", letterSpacing: -0.3 }}>
           スリーブチェッカー
         </span>
@@ -233,6 +288,17 @@ function App() {
           </button>
         )}
 
+        {hasData && (
+          <button onClick={() => window.print()} className="no-print"
+            style={{
+              padding: "5px 12px", background: "#fff", color: "#374151",
+              border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer",
+              fontSize: 12, fontWeight: 500,
+            }}>
+            PDF出力
+          </button>
+        )}
+
         {/* Summary */}
         {sleeveSummary && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, fontSize: 11, alignItems: "center" }}>
@@ -251,7 +317,7 @@ function App() {
         onChange={(e) => handleUploadDwg(e.target.files)} />
 
       {/* Row 2: Floor tabs + controls */}
-      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "6px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="no-print" style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "6px 20px", display: "flex", alignItems: "center", gap: 10 }}>
         {/* Floor segment */}
         {floors.length > 0 && (
           <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 7, padding: 2, gap: 2, fontSize: 12 }}>
@@ -331,6 +397,7 @@ function App() {
             {([
               ["grid", "通り芯"],
               ["wall", "壁"],
+              ["outerWall", "外壁"],
               ["step", "段差線"],
               ["column", "柱・仕上"],
               ["dim", "寸法"],
@@ -351,6 +418,33 @@ function App() {
               );
             })}
 
+            {/* Sleeve discipline sub-filters, shown when スリーブ layer is on */}
+            {layers.sleeve && (
+              <>
+                <span style={{ color: "#d1d5db", margin: "0 2px" }}>›</span>
+                {(["衛生", "空調", "電気", "その他"] as const).map((disc) => {
+                  const on = sleeveFilters[disc];
+                  const cnt = sleeveCounts[disc];
+                  const color =
+                    disc === "衛生" ? "#3b82f6" :
+                    disc === "空調" ? "#f59e0b" :
+                    disc === "電気" ? "#ef4444" : "#6b7280";
+                  return (
+                    <button key={disc}
+                      onClick={() => toggleSleeveFilter(disc)}
+                      disabled={cnt === 0}
+                      style={{
+                        padding: "2px 8px", borderRadius: 4, cursor: cnt === 0 ? "default" : "pointer", fontSize: 10,
+                        border: `1px solid ${on && cnt > 0 ? color : "#e5e7eb"}`,
+                        background: on && cnt > 0 ? `${color}15` : "#fff",
+                        color: on && cnt > 0 ? color : "#d1d5db",
+                        opacity: cnt === 0 ? 0.4 : 1,
+                      }}>{disc} {cnt > 0 && <span style={{ opacity: 0.7 }}>({cnt})</span>}</button>
+                  );
+                })}
+              </>
+            )}
+
             <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
             <span style={{ color: "#9ca3af", fontSize: 10 }}>色分け</span>
             <div style={{ display: "inline-flex", background: "#f3f4f6", borderRadius: 5, padding: 2, gap: 1 }}>
@@ -365,6 +459,43 @@ function App() {
                   }}>{label}</button>
               ))}
             </div>
+
+            <span style={{ color: "#d1d5db", margin: "0 4px" }}>|</span>
+            <span style={{ color: "#9ca3af", fontSize: 10 }}>PDF重ね</span>
+            <input
+              ref={pdfInputRef}
+              type="file"
+              accept=".pdf"
+              style={{ display: "none" }}
+              onChange={(e) => handleUploadPdf(e.target.files)}
+            />
+            <button
+              onClick={() => pdfInputRef.current?.click()}
+              style={{
+                padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
+                border: "1px solid #d1d5db", background: pdfOverlayUrl ? "#eff6ff" : "#fff",
+                color: pdfOverlayUrl ? "#1d4ed8" : "#374151",
+              }}
+            >{pdfOverlayUrl ? "PDF読込済" : "PDF選択"}</button>
+            {pdfOverlayUrl && (
+              <>
+                <input
+                  type="range" min={0} max={100} value={Math.round(pdfOverlayOpacity * 100)}
+                  onChange={(e) => setPdfOverlayOpacity(Number(e.target.value) / 100)}
+                  style={{ width: 80 }}
+                />
+                <span style={{ fontSize: 10, color: "#6b7280", minWidth: 28 }}>
+                  {Math.round(pdfOverlayOpacity * 100)}%
+                </span>
+                <button
+                  onClick={() => setPdfOverlayUrl(null)}
+                  style={{
+                    padding: "2px 6px", borderRadius: 4, cursor: "pointer", fontSize: 10,
+                    border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280",
+                  }}
+                >×</button>
+              </>
+            )}
 
             {/* Color legend */}
             {colorMode === "severity" && (
@@ -489,10 +620,13 @@ function App() {
                   onSleeveClick={setSelectedSleeve}
                   selectedSleeveId={selectedSleeve?.id || null}
                   layers={layers}
+                  sleeveFilters={sleeveFilters}
                   colorMode={colorMode}
                   navigateTarget={navigateTarget}
-                  onNavigated={() => setNavigateTarget(null)}
+                  onNavigated={handleNavigated}
                   highlightCoords={highlightCoords}
+                  pdfOverlayUrl={pdfOverlayUrl}
+                  pdfOverlayOpacity={pdfOverlayOpacity}
                 />
               ) : (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
@@ -501,7 +635,7 @@ function App() {
               )}
             </div>
             {/* Right sidebar */}
-            <div style={{ width: 300, borderLeft: "1px solid #e5e7eb", background: "#fff", overflow: "auto", flexShrink: 0 }}>
+            <div className="no-print" style={{ width: 300, borderLeft: "1px solid #e5e7eb", background: "#fff", overflow: "auto", flexShrink: 0 }}>
               {displaySleeve ? (
                 <SleeveInfo sleeve={displaySleeve} results={results} />
               ) : (
@@ -544,6 +678,51 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* Print-only: results table appended on separate page(s) */}
+      {hasData && (
+        <div className="print-results" style={{ display: "none" }}>
+          <style>{`@media print { .print-results { display: block !important; page-break-before: always; padding: 10mm; } }`}</style>
+          <h2 style={{ fontSize: 14, marginBottom: 8 }}>
+            {activeFloor.label} — チェック結果一覧
+          </h2>
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: "8%" }}>No.</th>
+                <th style={{ width: "10%" }}>重要度</th>
+                <th style={{ width: "20%" }}>チェック項目</th>
+                <th style={{ width: "12%" }}>P-N</th>
+                <th>メッセージ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results
+                .filter((r) => r.severity !== "OK")
+                .map((r, i) => {
+                  const sleeve = r.sleeve_id
+                    ? floorData?.sleeves.find((s) => s.id === r.sleeve_id)
+                    : null;
+                  return (
+                    <tr key={i}>
+                      <td>{r.check_id}</td>
+                      <td style={{
+                        color: r.severity === "NG" ? "#dc2626" : "#d97706",
+                        fontWeight: 600,
+                      }}>{r.severity}</td>
+                      <td>{r.check_name}</td>
+                      <td>{sleeve?.pn_number || r.sleeve_id || "-"}</td>
+                      <td>{r.message}</td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 10, fontSize: 10, color: "#6b7280" }}>
+            出力日時: {new Date().toLocaleString("ja-JP")}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

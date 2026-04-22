@@ -1,2 +1,21 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #f8fafc; color: #111827; }
+
+/* ---------- Print: PDF output via browser "Save as PDF" ---------- */
+@media print {
+  @page { size: A3 landscape; margin: 10mm; }
+  body { background: #fff; }
+  /* Hide everything that isn't explicitly marked printable */
+  .no-print, .no-print * { display: none !important; }
+  /* Expand the print area to full page */
+  .print-root { display: block !important; width: 100% !important; height: auto !important; }
+  .print-page { page-break-after: always; width: 100%; }
+  .print-page:last-child { page-break-after: auto; }
+  /* Keep SVG readable */
+  svg { max-width: 100%; height: auto; }
+  /* Table-like result list on subsequent pages */
+  .print-results table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+  .print-results th, .print-results td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+  .print-results thead { display: table-header-group; }
+  .print-results tr { page-break-inside: avoid; }
+}

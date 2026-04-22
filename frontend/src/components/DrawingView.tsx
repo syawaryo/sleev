@@ -11,6 +11,8 @@ interface Props {
   layers: { grid: boolean; wall: boolean; outerWall: boolean; step: boolean; column: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean };
   sleeveFilters: { 衛生: boolean; 空調: boolean; 電気: boolean; その他: boolean };
   colorMode: "severity" | "fl" | "discipline";
+  pdfOverlayUrl?: string | null;
+  pdfOverlayOpacity?: number;
   navigateTarget?: [number, number] | null;
   onNavigated?: () => void;
   highlightCoords?: [number, number][];
@@ -381,6 +383,7 @@ const HighlightLayer = memo(function HighlightLayer({ coords }: HighlightLayerPr
 function DrawingViewInner({
   floorData, lowerFloorData, results, onSleeveHover, onSleeveClick,
   selectedSleeveId, layers, sleeveFilters, colorMode, navigateTarget, onNavigated, highlightCoords,
+  pdfOverlayUrl, pdfOverlayOpacity = 0.4,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [vb, setVb] = useState<ViewBox>(INITIAL_VB);
@@ -545,6 +548,26 @@ function DrawingViewInner({
       onDoubleClick={handleDoubleClick}
     >
       <g transform="scale(1,-1)">
+        {/* PDF overlay (optional) — drawn behind everything.
+            Nested scale(1,-1) cancels the outer Y-flip so the PDF
+            renders upright in world space. */}
+        {pdfOverlayUrl && dataBounds && (() => {
+          const w = dataBounds.maxX - dataBounds.minX;
+          const h = dataBounds.maxY - dataBounds.minY;
+          return (
+            <g transform={`translate(0 ${dataBounds.minY + dataBounds.maxY}) scale(1,-1)`}>
+              <image
+                href={pdfOverlayUrl}
+                x={dataBounds.minX}
+                y={dataBounds.minY}
+                width={w}
+                height={h}
+                opacity={pdfOverlayOpacity}
+                preserveAspectRatio="xMidYMid meet"
+              />
+            </g>
+          );
+        })()}
         <StaticLayers
           floorData={floorData}
           lowerFloorData={lowerFloorData}
