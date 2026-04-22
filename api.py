@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from sleeve_checker.checks import run_all_checks
 from sleeve_checker.models import (
     FloorData, Sleeve, GridLine, DimLine, WallLine, StepLine,
-    ColumnLine, SlabZone, SlabLabel, SlabOutline, PnLabel, RecessPolygon,
+    ColumnLine, BeamLine, SlabZone, SlabLabel, SlabOutline, PnLabel, RecessPolygon,
     RawLine, RawText, RoomLabel,
 )
 from sleeve_checker.parser import parse_dxf
@@ -184,6 +184,10 @@ def _dict_to_floor_data(d: dict) -> FloorData:
         column_lines=[ColumnLine(
             start=tuple(c["start"]), end=tuple(c["end"]), layer=c.get("layer", ""),
         ) for c in d.get("column_lines", [])],
+        beam_lines=[BeamLine(
+            start=tuple(b["start"]), end=tuple(b["end"]),
+            layer=b.get("layer", ""), beam_type=b.get("beam_type", ""),
+        ) for b in d.get("beam_lines", [])],
         slab_zones=[SlabZone(
             x=z["x"], y=z["y"], fl_text=z["fl_text"], fl_value=z["fl_value"],
         ) for z in d.get("slab_zones", [])],
@@ -310,6 +314,11 @@ def _check_result_to_dict(cr) -> dict:
         "sleeve_id": sleeve.id if sleeve is not None else None,
         "message": cr.message,
         "related_coords": _convert(cr.related_coords),
+        "target": getattr(cr, "target", ""),
+        "rule": getattr(cr, "rule", ""),
+        "expected": getattr(cr, "expected", ""),
+        "found": getattr(cr, "found", ""),
+        "fix_hint": getattr(cr, "fix_hint", ""),
     }
 
 

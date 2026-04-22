@@ -75,6 +75,15 @@ class ColumnLine:
 
 
 @dataclass
+class BeamLine:
+    """A beam (梁) outline segment — RC梁 (F103) or 鉄骨梁 (F202)."""
+    start: tuple[float, float]
+    end: tuple[float, float]
+    layer: str = ""
+    beam_type: str = ""  # "RC梁" / "S梁" / "付帯梁" / "不明"
+
+
+@dataclass
 class SlabZone:
     x: float
     y: float
@@ -156,6 +165,7 @@ class FloorData:
     wall_lines: list[WallLine] = field(default_factory=list)
     step_lines: list[StepLine] = field(default_factory=list)
     column_lines: list[ColumnLine] = field(default_factory=list)
+    beam_lines: list[BeamLine] = field(default_factory=list)
     slab_zones: list[SlabZone] = field(default_factory=list)
     slab_outlines: list[SlabOutline] = field(default_factory=list)
     recess_polygons: list[RecessPolygon] = field(default_factory=list)
@@ -177,3 +187,11 @@ class CheckResult:
     sleeve: Sleeve | None = None
     message: str = ""
     related_coords: list[tuple[float, float]] = field(default_factory=list)
+    # Structured explanation — populated for NG / WARNING cases so the UI can
+    # render a 5-field card without having to re-parse `message`. Empty strings
+    # mean "not applicable / not yet populated".
+    target: str = ""     # 何を検査したか e.g. "スリーブ P-N-12 / [空調]F141_..."
+    rule: str = ""       # 判定基準
+    expected: str = ""   # 期待値
+    found: str = ""      # 実検出
+    fix_hint: str = ""   # 推奨対応

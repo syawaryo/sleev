@@ -48,6 +48,13 @@ export interface ColumnLine {
   layer: string;
 }
 
+export interface BeamLine {
+  start: [number, number];
+  end: [number, number];
+  layer: string;
+  beam_type: string;  // "RC梁" / "S梁" / "付帯梁" / "不明"
+}
+
 export interface DimLine {
   layer: string;
   measurement: number;
@@ -116,6 +123,7 @@ export interface FloorData {
   wall_lines: WallLine[];
   step_lines: StepLine[];
   column_lines: ColumnLine[];
+  beam_lines?: BeamLine[];
   dim_lines: DimLine[];
   slab_zones: SlabZone[];
   slab_outlines: SlabOutline[];
@@ -135,6 +143,12 @@ export interface CheckResult {
   sleeve_id: string | null;
   message: string;
   related_coords: [number, number][];
+  // Structured explanation (optional — empty string if not populated).
+  target?: string;
+  rule?: string;
+  expected?: string;
+  found?: string;
+  fix_hint?: string;
 }
 
 export interface CheckResponse {

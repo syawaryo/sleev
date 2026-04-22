@@ -1063,54 +1063,91 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
     # ARCs in DXF. Convert each ARC into a polyline of short segments so the
     # rounded portions render through the existing ColumnLine path.
     _ARC_SEGMENTS = 16
+    col_layer_set = set(col_layers)
+
+    def _push_line(sx: float, sy: float, ex: float, ey: float, lyr: str) -> None:
+        col_lines.append(ColumnLine(start=(sx, sy), end=(ex, ey), layer=lyr))
+
+    def _push_arc_from(cx: float, cy: float, r: float, sa: float, ea: float, lyr: str) -> None:
+        if ea < sa:
+            ea += 2.0 * math.pi
+        step = (ea - sa) / _ARC_SEGMENTS
+        prev_x = cx + r * math.cos(sa)
+        prev_y = cy + r * math.sin(sa)
+        for i in range(1, _ARC_SEGMENTS + 1):
+            a = sa + step * i
+            nx = cx + r * math.cos(a)
+            ny = cy + r * math.sin(a)
+            _push_line(prev_x, prev_y, nx, ny, lyr)
+            prev_x, prev_y = nx, ny
+
+    def _extract_from(entity, ox: float = 0.0, oy: float = 0.0,
+                      sx: float = 1.0, sy: float = 1.0,
+                      cos_r: float = 1.0, sin_r: float = 0.0,
+                      depth: int = 0) -> None:
+        """Pull column geometry from an entity, applying any nested INSERT
+        transform accumulated along the way. Only the entity's OWN layer must
+        be a column layer — INSERTs themselves can sit on any parent layer."""
+        if depth > 3:
+            return
+        k = entity.dxftype()
+
+        def _xf(px: float, py: float) -> tuple[float, float]:
+            lx = px * sx
+            ly = py * sy
+            return (ox + lx * cos_r - ly * sin_r,
+                    oy + lx * sin_r + ly * cos_r)
+
+        layer = entity.dxf.layer
+
+        if k == "INSERT":
+            block = doc.blocks.get(entity.dxf.name)
+            if block is None:
+                return
+            try:
+                ix = float(entity.dxf.insert.x)
+                iy = float(entity.dxf.insert.y)
+            except Exception:
+                return
+            isx = float(getattr(entity.dxf, "xscale", 1.0) or 1.0)
+            isy = float(getattr(entity.dxf, "yscale", 1.0) or 1.0)
+            rot = math.radians(float(getattr(entity.dxf, "rotation", 0.0) or 0.0))
+            new_cos = cos_r * math.cos(rot) - sin_r * math.sin(rot)
+            new_sin = sin_r * math.cos(rot) + cos_r * math.sin(rot)
+            ins_x, ins_y = _xf(ix, iy)
+            for be in block:
+                _extract_from(be, ins_x, ins_y, sx * isx, sy * isy,
+                              new_cos, new_sin, depth + 1)
+            return
+
+        if layer not in col_layer_set:
+            return
+
+        try:
+            if k == "LINE":
+                s = entity.dxf.start
+                e = entity.dxf.end
+                a = _xf(float(s.x), float(s.y))
+                b = _xf(float(e.x), float(e.y))
+                _push_line(a[0], a[1], b[0], b[1], layer)
+            elif k == "LWPOLYLINE":
+                pts = [_xf(float(p[0]), float(p[1])) for p in entity.get_points()]
+                for i in range(len(pts) - 1):
+                    _push_line(pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1], layer)
+                if getattr(entity, "is_closed", False) and len(pts) >= 2:
+                    _push_line(pts[-1][0], pts[-1][1], pts[0][0], pts[0][1], layer)
+            elif k == "ARC":
+                cx, cy = _xf(float(entity.dxf.center.x), float(entity.dxf.center.y))
+                r = float(entity.dxf.radius) * (abs(sx) + abs(sy)) / 2.0
+                rot_off = math.atan2(sin_r, cos_r)
+                sa = math.radians(float(entity.dxf.start_angle)) + rot_off
+                ea = math.radians(float(entity.dxf.end_angle)) + rot_off
+                _push_arc_from(cx, cy, r, sa, ea, layer)
+        except Exception:
+            return
 
     for entity in msp:
-        layer = entity.dxf.layer
-        if layer not in set(col_layers):
-            continue
-
-        if entity.dxftype() == "LINE":
-            sx, sy = entity.dxf.start.x, entity.dxf.start.y
-            ex, ey = entity.dxf.end.x, entity.dxf.end.y
-            col_lines.append(ColumnLine(start=(sx, sy), end=(ex, ey), layer=layer))
-
-        elif entity.dxftype() == "LWPOLYLINE":
-            pts = list(entity.get_points())
-            for i in range(len(pts) - 1):
-                sx, sy = float(pts[i][0]), float(pts[i][1])
-                ex, ey = float(pts[i + 1][0]), float(pts[i + 1][1])
-                col_lines.append(
-                    ColumnLine(start=(sx, sy), end=(ex, ey), layer=layer)
-                )
-            if entity.is_closed and len(pts) >= 2:
-                sx, sy = float(pts[-1][0]), float(pts[-1][1])
-                ex, ey = float(pts[0][0]), float(pts[0][1])
-                col_lines.append(
-                    ColumnLine(start=(sx, sy), end=(ex, ey), layer=layer)
-                )
-
-        elif entity.dxftype() == "ARC":
-            try:
-                cx = float(entity.dxf.center.x)
-                cy = float(entity.dxf.center.y)
-                r = float(entity.dxf.radius)
-                sa = math.radians(float(entity.dxf.start_angle))
-                ea = math.radians(float(entity.dxf.end_angle))
-            except Exception:
-                continue
-            if ea < sa:
-                ea += 2.0 * math.pi
-            step = (ea - sa) / _ARC_SEGMENTS
-            prev_x = cx + r * math.cos(sa)
-            prev_y = cy + r * math.sin(sa)
-            for i in range(1, _ARC_SEGMENTS + 1):
-                a = sa + step * i
-                nx = cx + r * math.cos(a)
-                ny = cy + r * math.sin(a)
-                col_lines.append(
-                    ColumnLine(start=(prev_x, prev_y), end=(nx, ny), layer=layer)
-                )
-                prev_x, prev_y = nx, ny
+        _extract_from(entity)
 
     # Drop detail-drawing columns that land in the sheet margins.
     return [
