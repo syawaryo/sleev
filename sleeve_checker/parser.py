@@ -329,11 +329,12 @@ _BLDG_TOLERANCE = 10.0  # mm tolerance for floating-point at boundaries
 
 # Detail-drawing fragments (legend panels, section cuts, title blocks,
 # enlarged details) often sit on the same architectural layers as the real
-# plan. A 5 m tolerance past the BLDG_X/Y bounds keeps real outer walls /
-# columns / slab outlines / thick 外壁 with finishes while still rejecting
-# detail clusters that live 10 m+ outside the footprint (y ≈ 100 k on
-# sample sheets).
-_PLAN_RANGE_TOL = 5000.0
+# plan. A 10 m tolerance past the BLDG_X/Y bounds keeps real outer walls,
+# entrance approach walls and thick 外壁 with finishes (the left-edge
+# entrance on the sample needed > 5 m), while still rejecting detail
+# clusters that live 20 m+ outside the footprint (e.g. y ≈ 100 k legend
+# panels on sample sheets).
+_PLAN_RANGE_TOL = 10000.0
 
 
 def _point_in_building_bbox(x: float, y: float) -> bool:
