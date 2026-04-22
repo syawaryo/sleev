@@ -618,6 +618,9 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
 
     wall_lines: list[WallLine] = []
 
+    # No _in_building_range filter here: outer perimeter walls legitimately
+    # extend past the hardcoded BLDG_X/Y bounds. Layer membership alone is a
+    # reliable discriminator because wall_layers is already vetted by name.
     for entity in msp:
         layer = entity.dxf.layer
         if layer not in set(wall_layers):
@@ -628,32 +631,24 @@ def _extract_wall_lines(doc, msp) -> list[WallLine]:
         if entity.dxftype() == "LINE":
             sx, sy = entity.dxf.start.x, entity.dxf.start.y
             ex, ey = entity.dxf.end.x, entity.dxf.end.y
-            if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
-                wall_lines.append(
-                    WallLine(start=(sx, sy), end=(ex, ey), layer=layer, wall_type=wtype)
-                )
+            wall_lines.append(
+                WallLine(start=(sx, sy), end=(ex, ey), layer=layer, wall_type=wtype)
+            )
 
         elif entity.dxftype() == "LWPOLYLINE":
             pts = list(entity.get_points())
             for i in range(len(pts) - 1):
                 sx, sy = float(pts[i][0]), float(pts[i][1])
                 ex, ey = float(pts[i + 1][0]), float(pts[i + 1][1])
-                if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
-                    wall_lines.append(
-                        WallLine(
-                            start=(sx, sy), end=(ex, ey), layer=layer, wall_type=wtype
-                        )
-                    )
-            # Close polyline if needed
+                wall_lines.append(
+                    WallLine(start=(sx, sy), end=(ex, ey), layer=layer, wall_type=wtype)
+                )
             if entity.is_closed and len(pts) >= 2:
                 sx, sy = float(pts[-1][0]), float(pts[-1][1])
                 ex, ey = float(pts[0][0]), float(pts[0][1])
-                if _in_building_range((sx + ex) / 2, (sy + ey) / 2):
-                    wall_lines.append(
-                        WallLine(
-                            start=(sx, sy), end=(ex, ey), layer=layer, wall_type=wtype
-                        )
-                    )
+                wall_lines.append(
+                    WallLine(start=(sx, sy), end=(ex, ey), layer=layer, wall_type=wtype)
+                )
 
     return wall_lines
 
