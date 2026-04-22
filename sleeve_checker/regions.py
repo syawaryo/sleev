@@ -16,6 +16,13 @@ from .models import SlabZone, StepLine
 
 _PROBE_OFFSET = 20.0          # mm — how far off the segment to place the probe
 _ENDPOINT_TOL = 5.0           # mm — endpoints within this distance are treated as shared
+# Relaxed line-of-sight: allow up to this many other step segments between
+# the probe origin and a FL label. Strict (=0) rejected legitimate labels
+# whenever the floor plan had a continuous chain of step lines between the
+# segment under test and its neighbouring FL marker. 1 is a conservative
+# compromise that recovers ~15 % more classifications without letting FL
+# labels from the far side of a wall-thick step chain leak through.
+_MAX_BLOCKING_INTERSECTIONS = 1
 
 
 @dataclass
@@ -101,15 +108,22 @@ def _nearest_unblocked_label(
         d = (dx * dx + dy * dy) ** 0.5
         if d >= best_dist:
             continue
-        # Line-of-sight: ignore segments in our own step chain.
+        # Line-of-sight: ignore segments in our own step chain. Allow up to
+        # _MAX_BLOCKING_INTERSECTIONS crossings — a single intermediate step
+        # line is usually the opposite edge of a short ramp / nusumi pocket,
+        # not a real slab-zone boundary, so the label beyond it still belongs
+        # to the same FL context we're probing.
+        crosses = 0
         blocked = False
         for k in blocker_indices:
             if chain_of[k] == own_chain:
                 continue
             a, b = step_segs[k]
             if _segments_intersect(origin, (lab.x, lab.y), a, b):
-                blocked = True
-                break
+                crosses += 1
+                if crosses > _MAX_BLOCKING_INTERSECTIONS:
+                    blocked = True
+                    break
         if not blocked:
             best_dist = d
             best_fl = lab.fl_value

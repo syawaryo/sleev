@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import ezdxf
 
 from .models import (
+    BeamLine,
     ColumnLine,
     DimLine,
     FloorData,
@@ -1119,6 +1120,57 @@ def _extract_column_lines(doc, msp) -> list[ColumnLine]:
 
 
 # ---------------------------------------------------------------------------
+# Beam extraction — F103_RC梁 / F202_Ｓ梁 / 付帯梁
+# ---------------------------------------------------------------------------
+
+def _extract_beam_lines(doc, msp) -> list[BeamLine]:
+    """Pull RC + Steel beam outlines from their conventional layers."""
+    beam_keywords = [
+        "F103_RC梁", "F104_RC梁", "F105_RC梁",
+        "F202_Ｓ梁", "F202_S梁",
+        "付帯梁",
+        "_梁", "]梁",
+    ]
+    beam_layers = _find_layers_any(doc, beam_keywords)
+
+    def _beam_type(layer_name: str) -> str:
+        if "付帯" in layer_name:
+            return "付帯梁"
+        if "RC梁" in layer_name or "F103" in layer_name or "F104" in layer_name:
+            return "RC梁"
+        if "Ｓ梁" in layer_name or "S梁" in layer_name or "F202" in layer_name:
+            return "S梁"
+        return "不明"
+
+    beam_lines: list[BeamLine] = []
+    for entity in msp:
+        layer = entity.dxf.layer
+        if layer not in set(beam_layers):
+            continue
+        btype = _beam_type(layer)
+        k = entity.dxftype()
+        if k == "LINE":
+            sx, sy = entity.dxf.start.x, entity.dxf.start.y
+            ex, ey = entity.dxf.end.x, entity.dxf.end.y
+            beam_lines.append(BeamLine(start=(sx, sy), end=(ex, ey), layer=layer, beam_type=btype))
+        elif k == "LWPOLYLINE":
+            pts = list(entity.get_points())
+            for i in range(len(pts) - 1):
+                sx, sy = float(pts[i][0]), float(pts[i][1])
+                ex, ey = float(pts[i + 1][0]), float(pts[i + 1][1])
+                beam_lines.append(BeamLine(start=(sx, sy), end=(ex, ey), layer=layer, beam_type=btype))
+            if getattr(entity, "is_closed", False) and len(pts) >= 2:
+                sx, sy = float(pts[-1][0]), float(pts[-1][1])
+                ex, ey = float(pts[0][0]), float(pts[0][1])
+                beam_lines.append(BeamLine(start=(sx, sy), end=(ex, ey), layer=layer, beam_type=btype))
+
+    return [
+        b for b in beam_lines
+        if _segment_in_building_bbox(b.start[0], b.start[1], b.end[0], b.end[1])
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Dimension line extraction
 # ---------------------------------------------------------------------------
 
@@ -2167,6 +2219,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     # not slab penetrations — reclassify them as horizontal.
     _infer_orientation_from_walls(sleeves, wall_lines)
     column_lines = _extract_column_lines(doc, msp)
+    beam_lines = _extract_beam_lines(doc, msp)
     dim_lines = _extract_dim_lines(doc, msp)
     pn_labels = _extract_pn_labels(doc, msp)
     _attach_pn_numbers(sleeves, pn_labels, doc=doc, msp=msp)
@@ -2183,8 +2236,30 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     # FL value of the region on each side. Spurious lines (same FL both
     # sides) can then be hidden by the frontend to match what a design
     # reviewer expects to see.
+    #
+    # FL label source = slab_zones (段差記号 FL±NNN texts) + slab_labels
+    # (SXX blocks carrying a level like "-60"). The SXX labels are spread
+    # across the main floor area while 段差記号 clusters near boundaries —
+    # using both gives near-total coverage.
     from .regions import classify_step_segments
-    for cls in classify_step_segments(step_lines, slab_zones):
+
+    _lvl_re = re.compile(r"([±+\-])?\s*(\d+)")
+    fl_sources = list(slab_zones)
+    for sl in slab_labels:
+        m = _lvl_re.search(sl.level)
+        if not m:
+            continue
+        sign = m.group(1) or "+"
+        val = int(m.group(2))
+        if sign == "-":
+            val = -val
+        elif sign == "±":
+            val = 0
+        fl_sources.append(
+            SlabZone(x=sl.x, y=sl.y, fl_text=f"FL{val:+d}", fl_value=val)
+        )
+
+    for cls in classify_step_segments(step_lines, fl_sources):
         cls.segment.side_a_fl = cls.side_a_fl
         cls.segment.side_b_fl = cls.side_b_fl
         cls.segment.fl_status = cls.status
@@ -2203,6 +2278,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         wall_lines=wall_lines,
         step_lines=step_lines,
         column_lines=column_lines,
+        beam_lines=beam_lines,
         dim_lines=dim_lines,
         slab_zones=slab_zones,
         slab_outlines=slab_outlines,
