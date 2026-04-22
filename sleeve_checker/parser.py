@@ -20,6 +20,8 @@ from .models import (
     FloorData,
     GridLine,
     PnLabel,
+    RawLine,
+    RawText,
     SlabLabel,
     SlabOutline,
     SlabZone,
@@ -326,10 +328,11 @@ _BLDG_TOLERANCE = 10.0  # mm tolerance for floating-point at boundaries
 
 # Detail-drawing fragments (legend panels, section cuts, title blocks,
 # enlarged details) often sit on the same architectural layers as the real
-# plan. A 2 m tolerance past the BLDG_X/Y bounds keeps real outer walls /
-# columns / slab outlines (which extend < 2 m past grids for thickness)
-# while rejecting detail clusters that sit 6 m+ outside the footprint.
-_PLAN_RANGE_TOL = 2000.0
+# plan. A 5 m tolerance past the BLDG_X/Y bounds keeps real outer walls /
+# columns / slab outlines / thick 外壁 with finishes while still rejecting
+# detail clusters that live 10 m+ outside the footprint (y ≈ 100 k on
+# sample sheets).
+_PLAN_RANGE_TOL = 5000.0
 
 
 def _point_in_building_bbox(x: float, y: float) -> bool:
@@ -2184,93 +2187,7 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         cls.segment.side_b_fl = cls.side_b_fl
         cls.segment.fl_status = cls.status
 
-    # ---------------------------------------------------------------------
-    # Stair-room exclusion.
-    # 階段室 is drawn with dense structural detail (stair stringer columns,
-    # handrails, tread fragments) that visually mushrooms into noise right
-    # where it meets the main plan edges. The project stakeholder wants
-    # those regions cleared out of the sleeve-check view. We locate each
-    # "階段" TEXT placed on the room-name layer and treat a 3.5 m radius
-    # around it as an exclusion disc. Walls, columns, step fragments and
-    # dim references whose endpoints fall inside any such disc are dropped.
-    # Sleeves themselves are LEFT IN — stair penetrations are still valid
-    # sleeve-check subjects — so this is a pure rendering-scope cleanup.
-    # ---------------------------------------------------------------------
-    # 6 m radius covers a full stair shaft (run + landings) without nibbling
-    # into the main floor. 外壁 is protected below, so enlarging this no
-    # longer puts the perimeter at risk.
-    STAIR_EXCLUSION_RADIUS = 6000.0
-    stair_centers: list[tuple[float, float]] = []
-    for entity in msp:
-        if entity.dxftype() not in ("TEXT", "MTEXT"):
-            continue
-        try:
-            txt = entity.dxf.text if entity.dxftype() == "TEXT" else entity.plain_mtext()
-        except Exception:
-            continue
-        if not txt or "階段" not in txt:
-            continue
-        layer = entity.dxf.layer
-        # Only the official room-name layer, to avoid matching annotation
-        # notes like "階段3下部床伏図・" that live elsewhere on the sheet.
-        if "A211" not in layer and "室名" not in layer:
-            continue
-        try:
-            pos = entity.dxf.insert
-            x, y = float(pos.x), float(pos.y)
-        except Exception:
-            continue
-        if _point_in_building_bbox(x, y):
-            stair_centers.append((x, y))
-
-    def _outside_all_stairs(px: float, py: float) -> bool:
-        for cx, cy in stair_centers:
-            if (px - cx) ** 2 + (py - cy) ** 2 <= STAIR_EXCLUSION_RADIUS ** 2:
-                return False
-        return True
-
-    def _segment_outside_stairs(sx: float, sy: float, ex: float, ey: float) -> bool:
-        # Reject if either endpoint OR midpoint falls inside a stair disc.
-        mx, my = (sx + ex) / 2.0, (sy + ey) / 2.0
-        return (
-            _outside_all_stairs(sx, sy)
-            and _outside_all_stairs(ex, ey)
-            and _outside_all_stairs(mx, my)
-        )
-
-    if stair_centers:
-        # Two classes of walls are ALWAYS preserved around stairs:
-        # 1. Explicit 外壁 (wall_type / layer). Stair cores sit directly
-        #    under the top outer wall so a naive disc erases part of it.
-        # 2. Perimeter centerlines. 壁心 layers don't carry an "外壁" tag
-        #    yet span the building edge — protect any wall whose midpoint
-        #    sits within 1.5 m of the building bbox boundary.
-        _PERIMETER_BAND = 1500.0
-        def _is_outer_wall(w: WallLine) -> bool:
-            return w.wall_type == "外壁" or "外壁" in w.layer
-        def _is_perimeter(sx: float, sy: float, ex: float, ey: float) -> bool:
-            mx, my = (sx + ex) / 2.0, (sy + ey) / 2.0
-            return (
-                mx - BLDG_X_MIN <= _PERIMETER_BAND
-                or BLDG_X_MAX - mx <= _PERIMETER_BAND
-                or my - BLDG_Y_MIN <= _PERIMETER_BAND
-                or BLDG_Y_MAX - my <= _PERIMETER_BAND
-            )
-        wall_lines = [
-            w for w in wall_lines
-            if _is_outer_wall(w)
-            or _is_perimeter(w.start[0], w.start[1], w.end[0], w.end[1])
-            or _segment_outside_stairs(w.start[0], w.start[1], w.end[0], w.end[1])
-        ]
-        # Columns are NOT clipped by the stair exclusion — every column /
-        # brace / joint / 根巻 element must render even when it sits in a
-        # stair core. Reviewer explicitly asked for every column shape.
-        step_lines = [s for s in step_lines
-                      if _segment_outside_stairs(s.start[0], s.start[1], s.end[0], s.end[1])]
-        slab_outlines = [o for o in slab_outlines
-                         if _segment_outside_stairs(o.start[0], o.start[1], o.end[0], o.end[1])]
-        slab_labels = [sl for sl in slab_labels if _outside_all_stairs(sl.x, sl.y)]
-        slab_zones = [z for z in slab_zones if _outside_all_stairs(z.x, z.y)]
+    raw_lines, raw_texts = _extract_raw_drawing(doc, msp)
 
     return FloorData(
         sleeves=sleeves,
@@ -2285,6 +2202,143 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         slab_labels=slab_labels,
         pn_labels=pn_labels,
         water_gradients=water_gradients,
+        raw_lines=raw_lines,
+        raw_texts=raw_texts,
         slab_level=slab_level,
         has_base_level_def=has_base_level_def,
     )
+
+
+# ---------------------------------------------------------------------------
+# Raw drawing passthrough — every line-ish / text entity grouped by layer.
+# Lets the UI render room names, beam outlines, level bubbles, revision
+# clouds etc. that the typed extractors above don't cover.
+# ---------------------------------------------------------------------------
+
+def _extract_raw_drawing(doc, msp) -> tuple[list[RawLine], list[RawText]]:
+    lines: list[RawLine] = []
+    texts: list[RawText] = []
+
+    _ARC_STEPS = 24
+
+    def _poly_from_arc(cx: float, cy: float, r: float, sa: float, ea: float) -> list[tuple[float, float]]:
+        if ea < sa:
+            ea += 2.0 * math.pi
+        pts: list[tuple[float, float]] = []
+        for i in range(_ARC_STEPS + 1):
+            a = sa + (ea - sa) * i / _ARC_STEPS
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+        return pts
+
+    def _poly_from_circle(cx: float, cy: float, r: float) -> list[tuple[float, float]]:
+        pts: list[tuple[float, float]] = []
+        for i in range(_ARC_STEPS + 1):
+            a = 2.0 * math.pi * i / _ARC_STEPS
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+        return pts
+
+    def _handle(entity, layer_override: str | None = None,
+                offset_x: float = 0.0, offset_y: float = 0.0,
+                scale_x: float = 1.0, scale_y: float = 1.0,
+                cos_r: float = 1.0, sin_r: float = 0.0) -> None:
+        layer = layer_override or entity.dxf.layer
+        try:
+            color = _resolve_entity_color(doc, entity)
+        except Exception:
+            color = None
+
+        def _xf(px: float, py: float) -> tuple[float, float]:
+            lx = px * scale_x
+            ly = py * scale_y
+            return (offset_x + lx * cos_r - ly * sin_r,
+                    offset_y + lx * sin_r + ly * cos_r)
+
+        k = entity.dxftype()
+        try:
+            if k == "LINE":
+                s = entity.dxf.start
+                e = entity.dxf.end
+                lines.append(RawLine(
+                    points=[_xf(s.x, s.y), _xf(e.x, e.y)],
+                    layer=layer, color=color,
+                ))
+            elif k == "LWPOLYLINE":
+                pts = [_xf(float(p[0]), float(p[1])) for p in entity.get_points()]
+                if getattr(entity, "is_closed", False) and len(pts) >= 2:
+                    pts.append(pts[0])
+                if len(pts) >= 2:
+                    lines.append(RawLine(points=pts, layer=layer, color=color))
+            elif k == "POLYLINE":
+                try:
+                    pts = [_xf(float(v.dxf.location.x), float(v.dxf.location.y))
+                           for v in entity.vertices]
+                except Exception:
+                    pts = []
+                if getattr(entity, "is_closed", False) and len(pts) >= 2:
+                    pts.append(pts[0])
+                if len(pts) >= 2:
+                    lines.append(RawLine(points=pts, layer=layer, color=color))
+            elif k == "ARC":
+                cx, cy = _xf(float(entity.dxf.center.x), float(entity.dxf.center.y))
+                r = float(entity.dxf.radius) * (abs(scale_x) + abs(scale_y)) / 2.0
+                rot_offset = math.atan2(sin_r, cos_r)
+                sa = math.radians(float(entity.dxf.start_angle)) + rot_offset
+                ea = math.radians(float(entity.dxf.end_angle)) + rot_offset
+                lines.append(RawLine(
+                    points=_poly_from_arc(cx, cy, r, sa, ea),
+                    layer=layer, color=color,
+                ))
+            elif k == "CIRCLE":
+                cx, cy = _xf(float(entity.dxf.center.x), float(entity.dxf.center.y))
+                r = float(entity.dxf.radius) * (abs(scale_x) + abs(scale_y)) / 2.0
+                lines.append(RawLine(
+                    points=_poly_from_circle(cx, cy, r),
+                    layer=layer, color=color,
+                ))
+            elif k == "TEXT":
+                t = (entity.dxf.text or "").strip()
+                if t:
+                    tx, ty = _xf(float(entity.dxf.insert.x), float(entity.dxf.insert.y))
+                    h = float(getattr(entity.dxf, "height", 200.0) or 200.0) * max(abs(scale_x), abs(scale_y))
+                    rot = float(getattr(entity.dxf, "rotation", 0.0) or 0.0) + math.degrees(math.atan2(sin_r, cos_r))
+                    texts.append(RawText(x=tx, y=ty, text=t, layer=layer,
+                                         height=h, rotation=rot, color=color))
+            elif k == "MTEXT":
+                try:
+                    t = entity.plain_text().strip()
+                except Exception:
+                    t = ""
+                if t:
+                    tx, ty = _xf(float(entity.dxf.insert.x), float(entity.dxf.insert.y))
+                    h = float(getattr(entity.dxf, "char_height", 200.0) or 200.0) * max(abs(scale_x), abs(scale_y))
+                    rot = float(getattr(entity.dxf, "rotation", 0.0) or 0.0) + math.degrees(math.atan2(sin_r, cos_r))
+                    texts.append(RawText(x=tx, y=ty, text=t, layer=layer,
+                                         height=h, rotation=rot, color=color))
+            elif k == "INSERT":
+                # Descend into block; BYLAYER entities inherit the INSERT's layer.
+                block = doc.blocks.get(entity.dxf.name)
+                if block is None:
+                    return
+                try:
+                    ix = float(entity.dxf.insert.x)
+                    iy = float(entity.dxf.insert.y)
+                except Exception:
+                    return
+                sx = float(getattr(entity.dxf, "xscale", 1.0) or 1.0)
+                sy = float(getattr(entity.dxf, "yscale", 1.0) or 1.0)
+                rot = math.radians(float(getattr(entity.dxf, "rotation", 0.0) or 0.0))
+                # Compose with the caller's transform.
+                new_cos = cos_r * math.cos(rot) - sin_r * math.sin(rot)
+                new_sin = sin_r * math.cos(rot) + cos_r * math.sin(rot)
+                ox, oy = _xf(ix, iy)
+                for be in block:
+                    inner_layer = be.dxf.layer if be.dxf.layer != "0" else layer
+                    _handle(be, inner_layer, ox, oy, scale_x * sx, scale_y * sy, new_cos, new_sin)
+        except Exception:
+            # Never let a single malformed entity break the parse.
+            return
+
+    for entity in msp:
+        _handle(entity)
+
+    return lines, texts

@@ -8,7 +8,7 @@ interface Props {
   onSleeveHover: (sleeve: Sleeve | null) => void;
   onSleeveClick: (sleeve: Sleeve | null) => void;
   selectedSleeveId: string | null;
-  layers: { grid: boolean; wall: boolean; outerWall: boolean; step: boolean; recess: boolean; column: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean };
+  layers: { grid: boolean; wall: boolean; outerWall: boolean; step: boolean; recess: boolean; column: boolean; sleeve: boolean; dim: boolean; lowerWall: boolean; slabLevel: boolean; raw: boolean };
   sleeveFilters: { 衛生: boolean; 空調: boolean; 電気: boolean; その他: boolean };
   colorMode: "severity" | "fl" | "discipline";
   pdfOverlayUrl?: string | null;
@@ -89,8 +89,45 @@ const StaticLayers = memo(function StaticLayers({
     };
   }, [floorData.grid_lines]);
 
+  // Raw passthrough rendering — every LINE / LWPOLYLINE / ARC / CIRCLE that
+  // didn't get picked up by a typed extractor. One <path> per layer keeps the
+  // SVG tree compact (~100 elements) even when the underlying DXF has tens of
+  // thousands of segments.
+  const rawPathsByLayer = useMemo(() => {
+    const raw = floorData.raw_lines || [];
+    if (raw.length === 0) return [] as { layer: string; d: string }[];
+    const groups = new Map<string, string[]>();
+    for (const r of raw) {
+      if (r.points.length < 2) continue;
+      const [x0, y0] = r.points[0];
+      const parts = [`M${x0.toFixed(1)} ${y0.toFixed(1)}`];
+      for (let i = 1; i < r.points.length; i++) {
+        const [x, y] = r.points[i];
+        parts.push(`L${x.toFixed(1)} ${y.toFixed(1)}`);
+      }
+      const list = groups.get(r.layer) || [];
+      list.push(parts.join(" "));
+      groups.set(r.layer, list);
+    }
+    return Array.from(groups.entries()).map(([layer, ds]) => ({
+      layer, d: ds.join(" "),
+    }));
+  }, [floorData.raw_lines]);
+
   return (
     <>
+      {/* Raw DXF passthrough — behind everything else, faint grey */}
+      {layers.raw && rawPathsByLayer.map(({ layer, d }) => (
+        <path key={`raw-${layer}`} d={d}
+          fill="none" stroke="#cbd5e1" strokeWidth={8} opacity={0.55} />
+      ))}
+      {layers.raw && (floorData.raw_texts || []).map((t, i) => (
+        <g key={`rawt-${i}`} transform={`translate(${t.x},${t.y}) scale(1,-1)${t.rotation ? ` rotate(${-t.rotation})` : ""}`}>
+          <text x={0} y={0} fontSize={Math.max(t.height || 250, 250)}
+                fill="#475569" fontFamily="'Noto Sans JP',sans-serif">{t.text}</text>
+        </g>
+      ))}
+
       {/* Grid lines + axis-label bubbles — drawn as 一点鎖線 (chain-dot),
           darker than walls so they read as the drawing's skeleton. */}
       {layers.grid && gridFrame && floorData.grid_lines.flatMap((g, i) => {

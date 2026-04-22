@@ -22,7 +22,8 @@ from pydantic import BaseModel
 from sleeve_checker.checks import run_all_checks
 from sleeve_checker.models import (
     FloorData, Sleeve, GridLine, DimLine, WallLine, StepLine,
-    ColumnLine, SlabZone, SlabLabel, SlabOutline, PnLabel,
+    ColumnLine, SlabZone, SlabLabel, SlabOutline, PnLabel, RecessPolygon,
+    RawLine, RawText,
 )
 from sleeve_checker.parser import parse_dxf
 from sleeve_checker.ifc_parser import parse_ifc
@@ -178,6 +179,8 @@ def _dict_to_floor_data(d: dict) -> FloorData:
         ) for w in d.get("wall_lines", [])],
         step_lines=[StepLine(
             start=tuple(s["start"]), end=tuple(s["end"]), layer=s.get("layer", ""),
+            side_a_fl=s.get("side_a_fl"), side_b_fl=s.get("side_b_fl"),
+            fl_status=s.get("fl_status", "unknown"),
         ) for s in d.get("step_lines", [])],
         column_lines=[ColumnLine(
             start=tuple(c["start"]), end=tuple(c["end"]), layer=c.get("layer", ""),
@@ -188,6 +191,10 @@ def _dict_to_floor_data(d: dict) -> FloorData:
         slab_outlines=[SlabOutline(
             start=tuple(o["start"]), end=tuple(o["end"]),
         ) for o in d.get("slab_outlines", [])],
+        recess_polygons=[RecessPolygon(
+            vertices=[tuple(v) for v in rp.get("vertices", [])],
+            layer=rp.get("layer", ""),
+        ) for rp in d.get("recess_polygons", [])],
         slab_labels=[SlabLabel(
             x=sl["x"], y=sl["y"], slab_no=sl["slab_no"],
             level=sl["level"], thickness=sl["thickness"],
@@ -196,6 +203,16 @@ def _dict_to_floor_data(d: dict) -> FloorData:
             x=p["x"], y=p["y"], text=p["text"], number=p["number"],
             arrow_verts=[tuple(v) for v in p.get("arrow_verts", [])],
         ) for p in d.get("pn_labels", [])],
+        raw_lines=[RawLine(
+            points=[tuple(p) for p in rl.get("points", [])],
+            layer=rl.get("layer", ""), color=rl.get("color"),
+        ) for rl in d.get("raw_lines", [])],
+        raw_texts=[RawText(
+            x=rt.get("x", 0.0), y=rt.get("y", 0.0),
+            text=rt.get("text", ""), layer=rt.get("layer", ""),
+            height=rt.get("height", 0.0), rotation=rt.get("rotation", 0.0),
+            color=rt.get("color"),
+        ) for rt in d.get("raw_texts", [])],
         slab_level=d.get("slab_level"),
         has_base_level_def=d.get("has_base_level_def", False),
     )

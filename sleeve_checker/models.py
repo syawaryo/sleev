@@ -52,6 +52,19 @@ class StepLine:
     start: tuple[float, float]
     end: tuple[float, float]
     layer: str = ""
+    # FL classification (filled by sleeve_checker.regions).
+    # "real" = both sides resolved to different FL, "spurious" = same FL on both sides,
+    # "unknown" = at least one side could not be resolved.
+    side_a_fl: int | None = None
+    side_b_fl: int | None = None
+    fl_status: str = "unknown"
+
+
+@dataclass
+class RecessPolygon:
+    """A closed floor-recess outline (床ヌスミ)."""
+    vertices: list[tuple[float, float]]
+    layer: str = ""
 
 
 @dataclass
@@ -101,6 +114,31 @@ class WaterGradient:
 
 
 @dataclass
+class RawLine:
+    """Generic polyline extracted for "raw DXF passthrough" rendering.
+
+    Used to surface every structural / annotation layer the typed
+    extractors don't cover (room-name frames, beam outlines, revision
+    clouds, etc.) so the UI can render the complete drawing.
+    """
+    points: list[tuple[float, float]] = field(default_factory=list)
+    layer: str = ""
+    color: int | None = None
+
+
+@dataclass
+class RawText:
+    """Generic text extracted for "raw DXF passthrough" rendering."""
+    x: float = 0.0
+    y: float = 0.0
+    text: str = ""
+    layer: str = ""
+    height: float = 0.0
+    rotation: float = 0.0
+    color: int | None = None
+
+
+@dataclass
 class FloorData:
     sleeves: list[Sleeve] = field(default_factory=list)
     grid_lines: list[GridLine] = field(default_factory=list)
@@ -110,9 +148,12 @@ class FloorData:
     column_lines: list[ColumnLine] = field(default_factory=list)
     slab_zones: list[SlabZone] = field(default_factory=list)
     slab_outlines: list[SlabOutline] = field(default_factory=list)
+    recess_polygons: list[RecessPolygon] = field(default_factory=list)
     slab_labels: list[SlabLabel] = field(default_factory=list)
     pn_labels: list[PnLabel] = field(default_factory=list)
     water_gradients: list[WaterGradient] = field(default_factory=list)
+    raw_lines: list[RawLine] = field(default_factory=list)
+    raw_texts: list[RawText] = field(default_factory=list)
     slab_level: str | None = None
     has_base_level_def: bool = False
 

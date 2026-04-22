@@ -32,6 +32,14 @@ export interface StepLine {
   start: [number, number];
   end: [number, number];
   layer: string;
+  side_a_fl?: number | null;
+  side_b_fl?: number | null;
+  fl_status?: "real" | "spurious" | "unknown";
+}
+
+export interface RecessPolygon {
+  vertices: [number, number][];
+  layer: string;
 }
 
 export interface ColumnLine {
@@ -78,6 +86,22 @@ export interface SlabOutline {
   end: [number, number];
 }
 
+export interface RawLine {
+  points: [number, number][];
+  layer: string;
+  color: number | null;
+}
+
+export interface RawText {
+  x: number;
+  y: number;
+  text: string;
+  layer: string;
+  height: number;
+  rotation: number;
+  color: number | null;
+}
+
 export interface FloorData {
   sleeves: Sleeve[];
   grid_lines: GridLine[];
@@ -87,8 +111,11 @@ export interface FloorData {
   dim_lines: DimLine[];
   slab_zones: SlabZone[];
   slab_outlines: SlabOutline[];
+  recess_polygons: RecessPolygon[];
   slab_labels: SlabLabel[];
   pn_labels: PnLabel[];
+  raw_lines?: RawLine[];
+  raw_texts?: RawText[];
   slab_level: string | null;
 }
 
