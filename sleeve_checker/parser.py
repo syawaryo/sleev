@@ -2196,7 +2196,10 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     # Sleeves themselves are LEFT IN — stair penetrations are still valid
     # sleeve-check subjects — so this is a pure rendering-scope cleanup.
     # ---------------------------------------------------------------------
-    STAIR_EXCLUSION_RADIUS = 3500.0
+    # 6 m radius covers a full stair shaft (run + landings) without nibbling
+    # into the main floor. 外壁 is protected below, so enlarging this no
+    # longer puts the perimeter at risk.
+    STAIR_EXCLUSION_RADIUS = 6000.0
     stair_centers: list[tuple[float, float]] = []
     for entity in msp:
         if entity.dxftype() not in ("TEXT", "MTEXT"):
@@ -2236,8 +2239,16 @@ def parse_dxf(filepath: str | Path) -> FloorData:
         )
 
     if stair_centers:
-        wall_lines = [w for w in wall_lines
-                      if _segment_outside_stairs(w.start[0], w.start[1], w.end[0], w.end[1])]
+        # 外壁 is ALWAYS preserved — stair rooms sit directly under the
+        # top outer wall on this floor, so a naive exclusion disc erases
+        # the building perimeter. Only interior walls fall into the filter.
+        def _is_outer_wall(w: WallLine) -> bool:
+            return w.wall_type == "外壁" or "外壁" in w.layer
+        wall_lines = [
+            w for w in wall_lines
+            if _is_outer_wall(w)
+            or _segment_outside_stairs(w.start[0], w.start[1], w.end[0], w.end[1])
+        ]
         column_lines = [c for c in column_lines
                         if _segment_outside_stairs(c.start[0], c.start[1], c.end[0], c.end[1])]
         step_lines = [s for s in step_lines
