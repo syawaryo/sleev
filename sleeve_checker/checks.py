@@ -1007,7 +1007,7 @@ def check_position_determinacy(
     rather than the centre.
     """
     if not sleeves:
-        return []
+        return [], {}, {}
 
     v_grid_positions = [g.position for g in grids if g.direction == "V"]
     h_grid_positions = [g.position for g in grids if g.direction == "H"]
