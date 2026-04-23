@@ -2265,7 +2265,16 @@ def parse_dxf(filepath: str | Path) -> FloorData:
     FloorData
         Populated dataclass.
     """
-    doc = ezdxf.readfile(str(filepath))
+    # Try strict readfile first; fall back to the recover mode when the
+    # source DXF has structural issues like a truncated section or a
+    # missing ENDSEC tag (we've seen this from third-party converters
+    # that bail before writing the final footer). `recover.readfile`
+    # silently fixes those inconsistencies and returns a usable Drawing.
+    try:
+        doc = ezdxf.readfile(str(filepath))
+    except ezdxf.DXFStructureError:
+        from ezdxf import recover
+        doc, _auditor = recover.readfile(str(filepath))
     msp = doc.modelspace()
 
     sleeves = _extract_sleeves(doc, msp)
