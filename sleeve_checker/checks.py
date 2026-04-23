@@ -277,7 +277,7 @@ def check_gradient(
         return [CheckResult(
             check_id=5,
             check_name="勾配記載",
-            severity="WARNING",
+            severity="NG",
             sleeve=sleeve,
             message=f"排水スリーブ 勾配確認要 | {detail_str}",
             related_coords=[sleeve.center],
@@ -292,7 +292,7 @@ def check_gradient(
         return [CheckResult(
             check_id=5,
             check_name="勾配記載",
-            severity="WARNING",
+            severity="NG",
             sleeve=sleeve,
             message=f"排水スリーブ FL記載なし | {detail_str}",
             related_coords=[sleeve.center],
