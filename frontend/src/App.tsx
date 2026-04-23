@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { FloorData, Sleeve, CheckResult } from "./types";
 import { getFloors, parseFloor, runChecks, uploadDxf, uploadDwg, uploadIfc } from "./api";
 import DrawingView from "./components/DrawingView";
