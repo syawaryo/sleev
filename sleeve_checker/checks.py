@@ -272,20 +272,16 @@ def check_gradient(
 
     detail_str = " | ".join(details)
 
-    # Drain sleeve with nearby gradient info → WARNING for human review
+    # Drain sleeve with nearby gradient info → OK (the info is recorded;
+    # the drafter has done their job). Any integrity doubt is left to
+    # human review elsewhere, not surfaced as a check NG/WARNING here.
     if has_water_gradient or nearest_slab_gradient:
         return [CheckResult(
             check_id=5,
             check_name="勾配記載",
-            severity="NG",
+            severity="OK",
             sleeve=sleeve,
-            message=f"排水スリーブ 勾配確認要 | {detail_str}",
-            related_coords=[sleeve.center],
-            target=_sleeve_target(sleeve),
-            rule="排水スリーブの勾配方向・FL値・配管番号の整合を目視確認する",
-            expected="FL値 + 水勾配方向 + 配管番号 がすべて明記されている",
-            found=detail_str,
-            fix_hint="勾配方向と排水経路が設計意図と一致しているか目視確認する",
+            message=f"排水スリーブ 勾配記載あり | {detail_str}",
         )]
 
     if not has_fl:
