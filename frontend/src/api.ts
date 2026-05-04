@@ -55,3 +55,34 @@ export async function runChecks(floor2fId: string, floor1fId?: string): Promise<
   });
   return res.data;
 }
+
+// ---------------------------------------------------------------------------
+// Universal-entity API — every DXF/IFC element flat-listed with a UI category.
+// ---------------------------------------------------------------------------
+
+export interface UniversalEntity {
+  handle: string;
+  layer: string;
+  type: string;
+  subtype: string;
+  pos: [number, number] | null;
+  props: Record<string, any>;
+}
+
+export interface AllEntitiesResponse {
+  summary: {
+    entity_count: number;
+    type_count: Record<string, number>;
+    layer_count: number;
+    layers: string[];
+    header: Record<string, any>;
+    block_count?: number;
+  };
+  entities: UniversalEntity[];
+  layer_categories: Record<string, string>;
+}
+
+export async function getAllEntities(floorId: string): Promise<AllEntitiesResponse> {
+  const res = await axios.post(`${BASE}/all_entities`, { floor_id: floorId });
+  return res.data;
+}

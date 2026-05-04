@@ -510,6 +510,7 @@ function App() {
             {floorData ? (
               <DataExplorer
                 floorData={floorData}
+                floorId={activeFloor.id}
                 onNavigate={(coords, sleeveId) => {
                   setViewMode("drawing");
                   setNavigateTarget(coords);

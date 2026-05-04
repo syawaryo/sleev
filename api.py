@@ -27,6 +27,8 @@ from sleeve_checker.models import (
 )
 from sleeve_checker.parser import parse_dxf
 from sleeve_checker.ifc_parser import parse_ifc
+from sleeve_checker.universal_parser import flatten, to_dict as udump_to_dict
+from sleeve_checker.layer_classifier import classify_layers
 from sleeve_checker.dwg_to_dxf import convert_dwg_to_dxf, DwgConversionError
 
 # ---------------------------------------------------------------------------
@@ -499,6 +501,115 @@ def parse_floor(request: ParseRequest) -> dict:
     """Parse a floor (DXF or IFC) and return FloorData as JSON (result is cached)."""
     floor_data = _resolve_floor_data(request.floor_id, request.path)
     return _floor_data_to_dict(floor_data)
+
+
+# ---------------------------------------------------------------------------
+# /api/all_entities — flat enumeration of EVERY DXF/IFC element with the
+# rule/LLM-based UI category attached. Used by DataExplorer to show every
+# layer the file contains, not just the 14 typed extractors in parser.py.
+# ---------------------------------------------------------------------------
+
+_universal_cache: dict[str, dict] = {}
+_ALL_ENTITIES_CACHE_DIR = Path(".all_entities_cache")
+
+
+def _all_entities_cache_path(cache_key: str) -> Path:
+    _ALL_ENTITIES_CACHE_DIR.mkdir(exist_ok=True)
+    safe = cache_key.replace("/", "_").replace("\\", "_")
+    return _ALL_ENTITIES_CACHE_DIR / f"{safe}.json"
+
+
+@app.post("/api/all_entities")
+def all_entities(request: ParseRequest) -> dict:
+    """Return every entity in the file plus a per-layer UI category mapping."""
+    import json as _json
+
+    cache_key = request.floor_id or request.path or ""
+
+    # In-memory cache
+    if cache_key and cache_key in _universal_cache:
+        return _universal_cache[cache_key]
+
+    # Disk cache (survives restarts)
+    if cache_key:
+        cache_file = _all_entities_cache_path(cache_key)
+        if cache_file.exists():
+            try:
+                cached = _json.loads(cache_file.read_text(encoding="utf-8"))
+                _universal_cache[cache_key] = cached
+                return cached
+            except Exception:
+                pass
+
+    # Source: IFC if registered, else resolve as DXF
+    if request.floor_id and request.floor_id in _IFC_SOURCES:
+        paths = [str(p) for p in _IFC_SOURCES[request.floor_id]]
+        dump = flatten(paths)
+    else:
+        filepath = _get_floor_path(request.floor_id, request.path)
+        dump = flatten(filepath)
+
+    # Build per-layer summary for the classifier
+    from collections import defaultdict
+    layer_types: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    layer_texts: dict[str, list[str]] = defaultdict(list)
+    layer_text_seen: dict[str, set[str]] = defaultdict(set)
+    for e in dump.entities:
+        layer_types[e.layer][e.type] = layer_types[e.layer].get(e.type, 0) + 1
+        if e.subtype and e.type in ("TEXT", "MTEXT"):
+            if e.subtype not in layer_text_seen[e.layer] and len(layer_texts[e.layer]) < 8:
+                layer_text_seen[e.layer].add(e.subtype)
+                layer_texts[e.layer].append(e.subtype)
+
+    layer_inputs = [
+        {
+            "name": name,
+            "sample_texts": layer_texts[name],
+            "type_count": dict(layer_types[name]),
+        }
+        for name in sorted(layer_types.keys())
+    ]
+
+    # Classify via LLM (cached on disk). Each unique layer is sent to the
+    # LLM exactly once per project — subsequent parses read the cache.
+    cache_dir = Path(".classifier_cache")
+    cache_file = cache_dir / f"{cache_key or 'default'}.json"
+    classifications = classify_layers(
+        layer_inputs,
+        use_llm=True,
+        cache_path=cache_file,
+    )
+
+    response = {
+        "summary": dump.summary,
+        "entities": [
+            {
+                "handle": e.handle,
+                "layer": e.layer,
+                "type": e.type,
+                "subtype": e.subtype,
+                "pos": list(e.pos) if e.pos else None,
+                "props": e.props,
+            }
+            for e in dump.entities
+        ],
+        "layer_categories": {
+            name: cls.get("category", "その他")
+            for name, cls in classifications.items()
+        },
+    }
+
+    if cache_key:
+        _universal_cache[cache_key] = response
+        try:
+            _all_entities_cache_path(cache_key).write_text(
+                _json.dumps(response, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    return response
 
 
 @app.post("/api/check")

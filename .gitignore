@@ -7,3 +7,5 @@ node_modules/
 frontend/dist/
 static/
 .parse_cache/
+.classifier_cache/
+.all_entities_cache/
