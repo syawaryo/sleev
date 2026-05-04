@@ -457,7 +457,7 @@ export default function DataExplorer({ floorData, floorId, onNavigate }: Props) 
                 }}>
                   {isOpen ? "⌄" : "›"}
                 </span>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                   <span style={{ fontWeight: 500, color: "#111827", letterSpacing: -0.1 }}>
                     {displayName(g.name)}
                   </span>
@@ -466,8 +466,10 @@ export default function DataExplorer({ floorData, floorId, onNavigate }: Props) 
                       fontSize: 10.5,
                       color: "#9ca3af",
                       letterSpacing: 0.1,
-                      whiteSpace: "normal",
-                      wordBreak: "break-word",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-all",
+                      overflowWrap: "anywhere",
+                      minWidth: 0,
                     }}>
                       {g.rawLayers.join(" · ")}
                     </span>
@@ -513,8 +515,9 @@ export default function DataExplorer({ floorData, floorId, onNavigate }: Props) 
                         letterSpacing: 0.1,
                         width: 200,
                         flexShrink: 0,
-                        whiteSpace: "normal",
+                        whiteSpace: "pre-wrap",
                         wordBreak: "break-all",
+                        overflowWrap: "anywhere",
                         fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
                       }}>
                         {r.rawLayer || "—"}
