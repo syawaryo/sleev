@@ -462,9 +462,14 @@ export default function DataExplorer({ floorData, floorId, onNavigate }: Props) 
                     {displayName(g.name)}
                   </span>
                   {g.rawLayers.length > 0 && (
-                    <span style={{ fontSize: 10.5, color: "#9ca3af", letterSpacing: 0.1 }}>
-                      {g.rawLayers.slice(0, 3).join(" · ")}
-                      {g.rawLayers.length > 3 ? ` …+${g.rawLayers.length - 3}` : ""}
+                    <span style={{
+                      fontSize: 10.5,
+                      color: "#9ca3af",
+                      letterSpacing: 0.1,
+                      whiteSpace: "normal",
+                      wordBreak: "break-word",
+                    }}>
+                      {g.rawLayers.join(" · ")}
                     </span>
                   )}
                 </div>
