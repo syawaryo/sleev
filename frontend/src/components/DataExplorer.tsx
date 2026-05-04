@@ -513,9 +513,8 @@ export default function DataExplorer({ floorData, floorId, onNavigate }: Props) 
                         letterSpacing: 0.1,
                         width: 200,
                         flexShrink: 0,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
+                        whiteSpace: "normal",
+                        wordBreak: "break-all",
                         fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
                       }}>
                         {r.rawLayer || "—"}
