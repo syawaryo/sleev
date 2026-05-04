@@ -417,11 +417,19 @@ export default function DataExplorer({ floorData, floorId, onNavigate }: Props) 
         )}
         {grouped.map((g, gi) => {
           const isOpen = openGroups.has(g.name) || autoExpand;
-          // Cap rendered children at 500/group so a 5k-entry layer doesn't
-          // freeze the browser. The count badge shows the real total.
-          const MAX_RENDER = 500;
-          const visible = g.entities.slice(0, MAX_RENDER);
-          const truncated = g.entities.length - visible.length;
+          // Useful (= not 不要) groups always render every entity — these
+          // are the ones the inspector actually cares about, so we never
+          // hide rows behind a "+N more". Only the noisy "不要" bucket is
+          // capped, since it can hold thousands of decorative shapes that
+          // would otherwise freeze the browser.
+          const isUnneeded = g.name === "不要";
+          const MAX_RENDER = isUnneeded ? 500 : Number.POSITIVE_INFINITY;
+          const visible = isUnneeded
+            ? g.entities.slice(0, MAX_RENDER)
+            : g.entities;
+          const truncated = isUnneeded
+            ? Math.max(0, g.entities.length - visible.length)
+            : 0;
           return (
             <div key={g.name} style={gi > 0 ? { borderTop: "1px solid #f3f4f6" } : undefined}>
               <div
