@@ -8,6 +8,12 @@ interface Props {
   onNavigate: (coords: [number, number], sleeveId?: string | null) => void;
 }
 
+// Module-level cache so the response survives tab switches.
+// Without this, switching to "図面" and back to "データ" remounts the
+// component, resets state, and re-fires the (slow) backend call.
+const _responseCache = new Map<string, AllEntitiesResponse>();
+const _inflight = new Map<string, Promise<AllEntitiesResponse>>();
+
 interface EntityRow {
   id: string;
   type: string;       // raw DXF/IFC type
@@ -162,13 +168,37 @@ export default function DataExplorer({ floorData, floorId, onNavigate }: Props) 
 
   useEffect(() => {
     if (!floorId) return;
+
+    // Show cached response immediately — no flicker on tab return.
+    const cached = _responseCache.get(floorId);
+    if (cached) {
+      setUniversal(cached);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
-    setUniversal(null);
-    getAllEntities(floorId)
+    // Don't clear `universal` here: keeping the previous payload visible
+    // while a refetch is in flight is better UX than going blank.
+
+    // De-duplicate concurrent fetches for the same floor.
+    let promise = _inflight.get(floorId);
+    if (!promise) {
+      promise = getAllEntities(floorId).then((u) => {
+        _responseCache.set(floorId, u);
+        return u;
+      }).finally(() => {
+        _inflight.delete(floorId);
+      });
+      _inflight.set(floorId, promise);
+    }
+
+    promise
       .then((u) => { if (!cancelled) setUniversal(u); })
       .catch((err) => { console.error("all_entities failed:", err); })
       .finally(() => { if (!cancelled) setLoading(false); });
+
     return () => { cancelled = true; };
   }, [floorId]);
 
