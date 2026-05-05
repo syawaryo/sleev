@@ -210,23 +210,24 @@ def classify_layers(
 ) -> dict[str, dict[str, Any]]:
     """Classify a batch of layers.
 
-    Strategy (rule-first, LLM fills the gaps):
-      1. Hit the on-disk cache by layer name.
-      2. For uncached layers, try the rule table first — it codifies the
-         Takenaka standard (F108_2 立上り → スラブ外形 etc.) and is
-         deterministic. Earlier we ran LLM-first and saw the model
-         confidently misclassify well-known layers like F108_4 開口線
-         as '不要'; rules guard against that.
-      3. Only layers the rule table can't recognise go to the LLM.
-      4. If the LLM is unreachable everything still resolves (fallback
-         to '不要').
+    Strategy (LLM-first, rules as fallback):
+      1. Hit the on-disk cache by layer name — every uncached layer goes
+         to the LLM. The fixed CATEGORIES list constrains the answer, but
+         the actual layer → category mapping is the LLM's call. Rules
+         can't enumerate every project's naming conventions, especially
+         non-Takenaka files and IFC class names.
+      2. If the LLM call degrades (no API key, SDK missing, network
+         error), fall back to the rule table per-layer so the result is
+         never empty. Only when neither LLM nor rule applies does a
+         layer land at '不要'.
 
     Parameters
     ----------
     layers:
         List of dicts: ``{"name": str, "sample_texts": list[str], "type_count": dict}``
     use_llm:
-        When False, skip the LLM entirely (rules-only).
+        When False, skip the LLM entirely (rules-only).  Useful in tests
+        and offline environments.
     cache_path:
         If provided, results are read from / written to this JSON file.
 
@@ -242,37 +243,45 @@ def classify_layers(
             cache = {}
 
     out: dict[str, dict[str, Any]] = {}
-    need_llm: list[dict[str, Any]] = []
+    need_classify: list[dict[str, Any]] = []
 
     for L in layers:
         name = L["name"]
         if name in cache:
             out[name] = cache[name]
-            continue
-        # Step 1: rule table (deterministic).
-        rcat = classify_layer_rule(name)
-        if rcat is not None:
-            out[name] = {
-                "category": rcat,
-                "confidence": 0.95,
-                "source": "rule",
-            }
-            continue
-        # Step 2: queue for LLM only if rules don't know.
-        need_llm.append(L)
-
-    if need_llm:
-        if use_llm:
-            llm_results = _llm_classify_batch(need_llm)
-            for name, res in llm_results.items():
-                out[name] = res
         else:
-            # No-LLM mode — pure rules + "不要" fallback.
-            for L in need_llm:
+            need_classify.append(L)
+
+    if need_classify:
+        if use_llm:
+            # LLM does the actual mapping — that's the whole point of having
+            # one. The fixed CATEGORIES list is the constraint, but which
+            # layer goes to which category is the model's call. Rules only
+            # come back into play if the LLM call fails (no key, network
+            # error, SDK missing).
+            llm_results = _llm_classify_batch(need_classify)
+            for name, res in llm_results.items():
+                degraded = res.get("source", "").startswith(("no_", "llm_error"))
+                if degraded:
+                    rcat = classify_layer_rule(name)
+                    if rcat is not None:
+                        out[name] = {
+                            "category": rcat,
+                            "confidence": 0.9,
+                            "source": "rule_fallback",
+                        }
+                    else:
+                        out[name] = res  # keep the no_*/llm_error → 不要 row
+                else:
+                    out[name] = res
+        else:
+            # Explicitly rules-only mode (tests, offline environments).
+            for L in need_classify:
+                cat = classify_layer_rule(L["name"]) or "不要"
                 out[L["name"]] = {
-                    "category": "不要",
-                    "confidence": 0.0,
-                    "source": "rule_unmatched",
+                    "category": cat,
+                    "confidence": 0.9 if cat != "不要" else 0.0,
+                    "source": "rule",
                 }
 
     # Anything still uncovered → "不要"
