@@ -62,24 +62,34 @@ CATEGORIES: list[str] = USEFUL_CATEGORIES + ["不要"]
 # ---------------------------------------------------------------------------
 
 _RULES: list[tuple[re.Pattern, str]] = [
-    # ---- スリーブ系 (discipline-aware) ----
-    # [衛生]スリーブ, [衛生]雨水(STPG) 等は機器コードが乗る
+    # ---- スリーブ系 (discipline-aware) — must be matched BEFORE the
+    # generic discipline catch-all rules below.
     (re.compile(r"\[衛生\].*スリーブ"), "スリーブ_衛生"),
     (re.compile(r"\[空調\].*スリーブ"), "スリーブ_空調"),
     (re.compile(r"\[電気\].*スリーブ"), "スリーブ_電気"),
-    (re.compile(r"\[衛生\]"),           "機器コード"),  # 配管系 (雨水/汚水/ガス…)
     (re.compile(r"スリーブ"),           "スリーブ_その他"),
     (re.compile(r"A858"),              "スリーブ_その他"),
 
-    # ---- P-N番号 / 衛生通常 ----
+    # ---- P-N 番号 — 衛生通常レイヤーは P-N-x が大量に並ぶ専用層 ----
     (re.compile(r"\[衛生\].*通常"), "P-N番号"),
+
+    # ---- 壁芯 (C151) — 通り芯 (C131/C141) より先に判定。
+    # 名前に '壁心' / '壁芯' が入るレイヤーは壁の中心線で、
+    # 通り芯（grid axis）ではない。
+    (re.compile(r"C151|壁心|壁芯"), "内壁"),
+
+    # ---- 寸法線 — 通り芯 / [衛生]/[電気] catch-all より先に判定。
+    # "通心寸法" / "[衛生]文字・寸法" 等が誤分類されるのを防ぐ。
+    (re.compile(r"寸法|配管寸|文字・寸法|C16[1234]"), "寸法線"),
+
+    # ---- 機器コード (discipline catch-all) — スリーブ・通常・寸法を
+    # 上で取り切った後の "[衛生] / [電気] / [空調] のその他系統別" に
+    # マッチさせる。配管系・電気系統別レイヤーが該当。
+    (re.compile(r"\[衛生\]"), "機器コード"),
 
     # ---- 通り芯 ----
     (re.compile(r"通心|通芯|通り心|通り芯"), "通り芯"),
-    (re.compile(r"C13[12]|C141|C151"),       "通り芯"),
-
-    # ---- 寸法線 ----
-    (re.compile(r"寸法|配管寸|文字・寸法|C16[1234]"), "寸法線"),
+    (re.compile(r"C13[12]|C141"),            "通り芯"),
 
     # ---- 壁系 ----
     (re.compile(r"外壁|既存躯体外壁"),                  "外壁"),
@@ -200,20 +210,23 @@ def classify_layers(
 ) -> dict[str, dict[str, Any]]:
     """Classify a batch of layers.
 
-    Strategy:
-      1. Hit the on-disk cache by layer name. Cached entries are reused
-         immediately (LLM is the source of truth, but we don't re-pay).
-      2. Anything not in the cache goes to the LLM in one batched call.
-      3. If the LLM is unreachable (no key / SDK / network), the rule
-         table is used as a safety net so we always return *something*.
+    Strategy (rule-first, LLM fills the gaps):
+      1. Hit the on-disk cache by layer name.
+      2. For uncached layers, try the rule table first — it codifies the
+         Takenaka standard (F108_2 立上り → スラブ外形 etc.) and is
+         deterministic. Earlier we ran LLM-first and saw the model
+         confidently misclassify well-known layers like F108_4 開口線
+         as '不要'; rules guard against that.
+      3. Only layers the rule table can't recognise go to the LLM.
+      4. If the LLM is unreachable everything still resolves (fallback
+         to '不要').
 
     Parameters
     ----------
     layers:
         List of dicts: ``{"name": str, "sample_texts": list[str], "type_count": dict}``
     use_llm:
-        When False, skip the LLM entirely (rules-only). Mostly useful in
-        tests and offline environments.
+        When False, skip the LLM entirely (rules-only).
     cache_path:
         If provided, results are read from / written to this JSON file.
 
@@ -229,39 +242,37 @@ def classify_layers(
             cache = {}
 
     out: dict[str, dict[str, Any]] = {}
-    need_classify: list[dict[str, Any]] = []
+    need_llm: list[dict[str, Any]] = []
 
     for L in layers:
         name = L["name"]
         if name in cache:
             out[name] = cache[name]
-        else:
-            need_classify.append(L)
+            continue
+        # Step 1: rule table (deterministic).
+        rcat = classify_layer_rule(name)
+        if rcat is not None:
+            out[name] = {
+                "category": rcat,
+                "confidence": 0.95,
+                "source": "rule",
+            }
+            continue
+        # Step 2: queue for LLM only if rules don't know.
+        need_llm.append(L)
 
-    if need_classify:
+    if need_llm:
         if use_llm:
-            llm_results = _llm_classify_batch(need_classify)
+            llm_results = _llm_classify_batch(need_llm)
             for name, res in llm_results.items():
-                # If the LLM degraded (no key / error), fall back to rules
-                # for that specific layer.
-                if res.get("source", "").startswith(("no_", "llm_error")):
-                    rcat = classify_layer_rule(name)
-                    if rcat is not None:
-                        out[name] = {
-                            "category": rcat,
-                            "confidence": 0.9,
-                            "source": "rule_fallback",
-                        }
-                        continue
                 out[name] = res
         else:
             # No-LLM mode — pure rules + "不要" fallback.
-            for L in need_classify:
-                cat = classify_layer_rule(L["name"]) or "不要"
+            for L in need_llm:
                 out[L["name"]] = {
-                    "category": cat,
-                    "confidence": 0.9 if cat != "不要" else 0.0,
-                    "source": "rule",
+                    "category": "不要",
+                    "confidence": 0.0,
+                    "source": "rule_unmatched",
                 }
 
     # Anything still uncovered → "不要"
