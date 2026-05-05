@@ -297,7 +297,9 @@ const StaticLayers = memo(function StaticLayers({
 
       {/* Raw "grid line" geometry — every line on a 通り芯-classified
           layer, regardless of length. Renders behind the typed grid
-          frame so the bubbled axis labels stay legible. */}
+          frame so the bubbled axis labels stay legible. While the
+          universal payload is still loading, the typed grid frame
+          (below) is enough on its own. */}
       {layers.grid && universalEntities && layerCategories &&
         renderRawEntitiesByCategory(
           universalEntities, layerCategories, "通り芯",
@@ -338,77 +340,112 @@ const StaticLayers = memo(function StaticLayers({
           stroke="#8b5cf6" strokeWidth={40} opacity={0.4} />
       ))}
 
-      {/* Walls — raw render: every entity on a 内壁/外壁-classified layer.
-          The typed wall_lines path was using a bbox heuristic that could
-          drop legitimate exterior walls; honoring the layer name directly
-          guarantees nothing the drafter authored is hidden. */}
-      {layers.outerWall && universalEntities && layerCategories &&
-        renderRawEntitiesByCategory(
-          universalEntities, layerCategories, "外壁",
-          { stroke: "#111827", strokeWidth: 55, strokeOpacity: 1.0 },
-          "ow-raw",
-        )
-      }
-      {layers.wall && universalEntities && layerCategories &&
-        renderRawEntitiesByCategory(
-          universalEntities, layerCategories, "内壁",
-          { stroke: "#64748b", strokeWidth: 25, strokeOpacity: 1.0 },
-          "iw-raw",
-        )
-      }
-
-      {/* Recess (床ヌスミ) — show every entity on a 床ヌスミ-classified layer
-          so we don't miss recess boundaries that happen to be authored as
-          open polylines or individual LINE segments. The strict
-          `floorData.recess_polygons` (closed polygons only) is the source
-          of truth for the check engine, but the drawing view should
-          paint everything that lives on the layer. */}
-      {layers.recess && universalEntities && layerCategories &&
-        renderRawEntitiesByCategory(
-          universalEntities, layerCategories, "床ヌスミ",
-          { stroke: "#0369a1", strokeWidth: 15, fill: "#0ea5e9", fillOpacity: 0.22, strokeOpacity: 0.8, strokeDasharray: "60 30" },
-          "r-raw",
-        )
-      }
-
-      {/* Step lines — raw: every entity on a 段差線-classified layer.
-          Includes building-perimeter lines that happen to live on the
-          step layer; the user explicitly asked for layer-name fidelity
-          rather than length-based filtering. */}
-      {layers.step && universalEntities && layerCategories &&
-        renderRawEntitiesByCategory(
-          universalEntities, layerCategories, "段差線",
-          { stroke: "#d97706", strokeWidth: 25, strokeOpacity: 0.9 },
-          "s-raw",
-        )
-      }
-
-      {/* Column / wall-finish lines — raw: every entity on a
-          柱・仕上線-classified layer. Also includes スラブ外形 because
-          the column toggle historically covers slab outlines too. */}
-      {layers.column && universalEntities && layerCategories && (
+      {/* Walls — raw render when the universal payload is available,
+          otherwise fall back to the typed FloorData walls so the drawing
+          isn't blank during the initial fetch. */}
+      {universalEntities && layerCategories ? (
         <>
-          {renderRawEntitiesByCategory(
-            universalEntities, layerCategories, "柱・仕上線",
-            { stroke: "#7c3aed", strokeWidth: 20, strokeOpacity: 0.6 },
-            "col-raw",
+          {layers.outerWall && renderRawEntitiesByCategory(
+            universalEntities, layerCategories, "外壁",
+            { stroke: "#111827", strokeWidth: 55, strokeOpacity: 1.0 },
+            "ow-raw",
           )}
-          {renderRawEntitiesByCategory(
-            universalEntities, layerCategories, "スラブ外形",
-            { stroke: "#7c3aed", strokeWidth: 18, strokeOpacity: 0.4 },
-            "so-raw",
+          {layers.wall && renderRawEntitiesByCategory(
+            universalEntities, layerCategories, "内壁",
+            { stroke: "#64748b", strokeWidth: 25, strokeOpacity: 1.0 },
+            "iw-raw",
           )}
         </>
+      ) : (
+        floorData.wall_lines.map((w, i) => {
+          const isOuter = wallIsOuter[i];
+          const visible = isOuter ? layers.outerWall : layers.wall;
+          if (!visible) return null;
+          return (
+            <line key={`w${i}`} x1={w.start[0]} y1={w.start[1]} x2={w.end[0]} y2={w.end[1]}
+              stroke={isOuter ? "#111827" : "#64748b"}
+              strokeWidth={isOuter ? 55 : 25}
+              strokeLinecap={isOuter ? "round" : undefined} />
+          );
+        })
       )}
 
-      {/* Beams (梁) — raw: every entity on a 梁-classified layer. */}
-      {layers.beam && universalEntities && layerCategories &&
-        renderRawEntitiesByCategory(
-          universalEntities, layerCategories, "梁",
-          { stroke: "#a855f7", strokeWidth: 10, strokeDasharray: "200 100", strokeOpacity: 0.7 },
-          "bm-raw",
+      {/* Recess (床ヌスミ) — raw if available, typed fallback otherwise. */}
+      {layers.recess && (
+        universalEntities && layerCategories
+          ? renderRawEntitiesByCategory(
+              universalEntities, layerCategories, "床ヌスミ",
+              { stroke: "#0369a1", strokeWidth: 15, fill: "#0ea5e9", fillOpacity: 0.22, strokeOpacity: 0.8, strokeDasharray: "60 30" },
+              "r-raw",
+            )
+          : (floorData.recess_polygons || []).map((rp, i) => {
+              const d = rp.vertices.length
+                ? "M " + rp.vertices.map(([x, y]) => `${x} ${y}`).join(" L ") + " Z"
+                : "";
+              if (!d) return null;
+              return (
+                <path key={`r${i}`} d={d}
+                  fill="#0ea5e9" fillOpacity={0.22}
+                  stroke="#0369a1" strokeWidth={15} strokeOpacity={0.7}
+                  strokeDasharray="60 30" />
+              );
+            })
+      )}
+
+      {/* Step lines — raw with typed fallback. */}
+      {layers.step && (
+        universalEntities && layerCategories
+          ? renderRawEntitiesByCategory(
+              universalEntities, layerCategories, "段差線",
+              { stroke: "#d97706", strokeWidth: 25, strokeOpacity: 0.9 },
+              "s-raw",
+            )
+          : floorData.step_lines.map((s, i) => {
+              if (s.fl_status === "spurious") return null;
+              const opacity = s.fl_status === "real" ? 0.9 : 0.5;
+              return (
+                <line key={`s${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
+                  stroke="#d97706" strokeWidth={25} opacity={opacity} />
+              );
+            })
+      )}
+
+      {/* Columns / slab outlines — raw with typed fallback. */}
+      {layers.column && (
+        universalEntities && layerCategories ? (
+          <>
+            {renderRawEntitiesByCategory(
+              universalEntities, layerCategories, "柱・仕上線",
+              { stroke: "#7c3aed", strokeWidth: 20, strokeOpacity: 0.6 },
+              "col-raw",
+            )}
+            {renderRawEntitiesByCategory(
+              universalEntities, layerCategories, "スラブ外形",
+              { stroke: "#7c3aed", strokeWidth: 18, strokeOpacity: 0.4 },
+              "so-raw",
+            )}
+          </>
+        ) : (
+          floorData.column_lines.map((c, i) => (
+            <line key={`col${i}`} x1={c.start[0]} y1={c.start[1]} x2={c.end[0]} y2={c.end[1]}
+              stroke="#7c3aed" strokeWidth={20} opacity={0.6} />
+          ))
         )
-      }
+      )}
+
+      {/* Beams — raw with typed fallback. */}
+      {layers.beam && (
+        universalEntities && layerCategories
+          ? renderRawEntitiesByCategory(
+              universalEntities, layerCategories, "梁",
+              { stroke: "#a855f7", strokeWidth: 10, strokeDasharray: "200 100", strokeOpacity: 0.7 },
+              "bm-raw",
+            )
+          : (floorData.beam_lines || []).map((b, i) => (
+              <line key={`bm${i}`} x1={b.start[0]} y1={b.start[1]} x2={b.end[0]} y2={b.end[1]}
+                stroke="#a855f7" strokeWidth={10} strokeDasharray="200 100" opacity={0.7} />
+            ))
+      )}
 
       {/* Dimension lines */}
       {layers.dim && floorData.dim_lines.map((d, i) => {
