@@ -330,40 +330,13 @@ def _llm_classify_batch(
     return out
 
 
-def _llm_classify_single_batch(
-    layers: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """One LLM call for one chunk of layers."""
-    api_key = os.getenv("OPENAI_API_KEY", "")
-    if not api_key:
-        return {
-            L["name"]: {"category": "不要", "confidence": 0.0, "source": "no_llm"}
-            for L in layers
-        }
+# ---------------------------------------------------------------------------
+# Static system prompt — same bytes for every batch + every parse.
+# Lifting it to module scope lets prompt caching reuse the rendered prefix.
+# ---------------------------------------------------------------------------
 
-    try:
-        from openai import OpenAI
-    except ImportError:
-        return {
-            L["name"]: {"category": "不要", "confidence": 0.0, "source": "no_openai_sdk"}
-            for L in layers
-        }
-
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    client = OpenAI(api_key=api_key)
-
-    # Build a compact prompt — the LLM gets the layer name, what kinds of
-    # entities live on it (counts), and up to 8 sample TEXT/MTEXT values.
-    cats_str = ", ".join(CATEGORIES)
-    items: list[dict[str, Any]] = []
-    for L in layers:
-        items.append({
-            "name": L["name"],
-            "types": L.get("type_count", {}),
-            "sample_texts": L.get("sample_texts", [])[:8],
-        })
-
-    system = (
+def _system_prompt() -> str:
+    return (
         "あなたは日本のゼネコン施工図（DXF/IFC）を読むベテランエンジニアです。"
         "**スリーブ施工図のチェック**および**地図表示**にとって有用な要素だけを"
         "抽出するために、各レイヤーを分類してください。\n\n"
@@ -416,61 +389,204 @@ def _llm_classify_single_batch(
         '{ "results": [ { "name": "...", "category": "...", "confidence": 0.0-1.0, "reason": "短い理由" } ] }'
     )
 
-    user = "以下のレイヤーを分類してください:\n" + json.dumps(items, ensure_ascii=False, indent=2)
+
+def _build_user_message(layers: list[dict[str, Any]]) -> str:
+    items: list[dict[str, Any]] = []
+    for L in layers:
+        items.append({
+            "name": L["name"],
+            "types": L.get("type_count", {}),
+            "sample_texts": L.get("sample_texts", [])[:8],
+        })
+    return "以下のレイヤーを分類してください:\n" + json.dumps(items, ensure_ascii=False, indent=2)
+
+
+def _parse_results_json(text: str, layers: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Parse the LLM's JSON output and validate every entry."""
+    # The model is told to emit pure JSON; locate the outermost object even
+    # if it added stray prose around it.
+    text = text.strip()
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start:end + 1]
+
+    parsed = json.loads(text)
+    if isinstance(parsed, dict) and "results" in parsed:
+        arr = parsed["results"]
+    elif isinstance(parsed, dict) and "layers" in parsed:
+        arr = parsed["layers"]
+    elif isinstance(parsed, list):
+        arr = parsed
+    else:
+        arr = list(parsed.values())[0] if parsed else []
+
+    result: dict[str, dict[str, Any]] = {}
+    for item in arr:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("layer")
+        cat = item.get("category", "不要")
+        if cat not in CATEGORIES:
+            cat = "不要"
+        if name:
+            result[name] = {
+                "category": cat,
+                "confidence": float(item.get("confidence", 0.5)),
+                "reason": str(item.get("reason", ""))[:200],
+                "source": "llm",
+            }
+    # Backfill any layer the model didn't return
+    for L in layers:
+        if L["name"] not in result:
+            result[L["name"]] = {
+                "category": "不要",
+                "confidence": 0.0,
+                "source": "llm_missing",
+            }
+    return result
+
+
+def _llm_classify_single_batch(
+    layers: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """One LLM call for one chunk of layers.
+
+    Anthropic Claude is preferred for accuracy. If ANTHROPIC_API_KEY is unset
+    or the SDK is missing, fall back to OpenAI. If neither is available,
+    every layer falls through to '不要'.
+    """
+    # Auto-load .env so the env-var checks below see the keys.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return _classify_with_anthropic(layers)
+    if os.getenv("OPENAI_API_KEY"):
+        return _classify_with_openai(layers)
+    return {
+        L["name"]: {"category": "不要", "confidence": 0.0, "source": "no_llm"}
+        for L in layers
+    }
+
+
+def _classify_with_anthropic(
+    layers: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Anthropic Claude path. Uses prompt caching on the static system prompt."""
+    try:
+        import anthropic
+    except ImportError:
+        return {
+            L["name"]: {"category": "不要", "confidence": 0.0, "source": "no_anthropic_sdk"}
+            for L in layers
+        }
+
+    # claude-opus-4-7 is the default per claude-api skill — most capable
+    # model, adaptive thinking only. Override via env if needed.
+    model = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-7")
+    client = anthropic.Anthropic()
+
+    system_text = _system_prompt()
+    user_text = _build_user_message(layers)
+
+    # JSON Schema for structured outputs — Claude validates the response
+    # shape against this, so we never get malformed JSON back.
+    schema = {
+        "type": "object",
+        "properties": {
+            "results": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "category": {"type": "string"},
+                        "confidence": {"type": "number"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["name", "category", "confidence"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["results"],
+        "additionalProperties": False,
+    }
+
+    try:
+        resp = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            # System prompt is identical for every batch + every parse —
+            # tag it for caching so subsequent invocations only pay ~0.1×
+            # for the prefix.  Note: caches only kick in once the prompt
+            # crosses ~4096 tokens on Opus-tier; smaller prompts silently
+            # no-op (harmless).
+            system=[{
+                "type": "text",
+                "text": system_text,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": user_text}],
+            output_config={
+                "effort": "high",
+                "format": {"type": "json_schema", "schema": schema},
+            },
+        )
+        text = next(
+            (b.text for b in resp.content if getattr(b, "type", None) == "text"),
+            "",
+        )
+        return _parse_results_json(text, layers)
+    except Exception as e:
+        return {
+            L["name"]: {
+                "category": "不要",
+                "confidence": 0.0,
+                "source": f"llm_error:anthropic:{type(e).__name__}",
+            }
+            for L in layers
+        }
+
+
+def _classify_with_openai(
+    layers: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """OpenAI fallback. Used only if ANTHROPIC_API_KEY is unset."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return {
+            L["name"]: {"category": "不要", "confidence": 0.0, "source": "no_openai_sdk"}
+            for L in layers
+        }
+
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    client = OpenAI()
 
     try:
         resp = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "system", "content": _system_prompt()},
+                {"role": "user", "content": _build_user_message(layers)},
             ],
             temperature=0.0,
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content or "{}"
-        # Some models wrap a list under a key; try to unwrap
-        parsed = json.loads(content)
-        if isinstance(parsed, dict) and "results" in parsed:
-            arr = parsed["results"]
-        elif isinstance(parsed, dict) and "layers" in parsed:
-            arr = parsed["layers"]
-        elif isinstance(parsed, list):
-            arr = parsed
-        else:
-            arr = list(parsed.values())[0] if parsed else []
-
-        result: dict[str, dict[str, Any]] = {}
-        for item in arr:
-            if not isinstance(item, dict):
-                continue
-            name = item.get("name") or item.get("layer")
-            cat = item.get("category", "不要")
-            if cat not in CATEGORIES:
-                cat = "不要"
-            if name:
-                result[name] = {
-                    "category": cat,
-                    "confidence": float(item.get("confidence", 0.5)),
-                    "reason": str(item.get("reason", ""))[:200],
-                    "source": "llm",
-                }
-        # Backfill any missing entries
-        for L in layers:
-            if L["name"] not in result:
-                result[L["name"]] = {
-                    "category": "不要",
-                    "confidence": 0.0,
-                    "source": "llm_missing",
-                }
-        return result
+        return _parse_results_json(content, layers)
     except Exception as e:
-        # Network or parse failure → degrade gracefully
         return {
             L["name"]: {
                 "category": "不要",
                 "confidence": 0.0,
-                "source": f"llm_error:{type(e).__name__}",
+                "source": f"llm_error:openai:{type(e).__name__}",
             }
             for L in layers
         }

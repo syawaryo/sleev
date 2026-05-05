@@ -8,5 +8,6 @@ uvicorn>=0.20
 python-multipart>=0.0.6
 ifcopenshell>=0.8
 numpy>=1.26
+anthropic>=0.50
 openai>=1.0
 python-dotenv>=1.0
