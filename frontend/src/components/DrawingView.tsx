@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef, useCallback, useEffect, memo } from "react";
+import type { ReactElement } from "react";
 import type { FloorData, Sleeve, CheckResult } from "../types";
 import type { UniversalEntity } from "../api";
 
@@ -86,8 +87,8 @@ function renderRawEntitiesByCategory(
   category: string,
   style: RawStyle,
   keyPrefix: string,
-): JSX.Element[] {
-  const out: JSX.Element[] = [];
+): ReactElement[] {
+  const out: ReactElement[] = [];
   for (let i = 0; i < entities.length; i++) {
     const e = entities[i];
     if (layerCategories[e.layer] !== category) continue;
@@ -160,10 +161,13 @@ interface StaticLayersProps {
   layers: LayersState;
   dataBounds: DataBounds | null;
   flColorMap: Map<string, string>;
+  universalEntities: UniversalEntity[] | null;
+  layerCategories: Record<string, string> | null;
 }
 
 const StaticLayers = memo(function StaticLayers({
   floorData, lowerFloorData, layers, dataBounds, flColorMap,
+  universalEntities, layerCategories,
 }: StaticLayersProps) {
   // Pre-compute outer-wall classification once (regex in render loop is wasteful).
   const wallIsOuter = useMemo(
@@ -1029,6 +1033,8 @@ function DrawingViewInner({
           layers={layers}
           dataBounds={dataBounds}
           flColorMap={flColorMap}
+          universalEntities={universalEntities ?? null}
+          layerCategories={layerCategories ?? null}
         />
         <SleeveLayer
           sleeves={floorData.sleeves}
