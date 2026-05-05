@@ -141,9 +141,32 @@ function renderRawEntitiesByCategory(
           fillOpacity={style.fillOpacity}
         />,
       );
+    } else if (t === "HATCH") {
+      // Hatch boundaries — we don't reproduce the actual diagonal lines,
+      // just outline + fill the region so it reads as "this area is
+      // hatched in the source DXF".
+      const loops: number[][][] | undefined = e.props?.loops;
+      if (!Array.isArray(loops) || loops.length === 0) continue;
+      const d = loops
+        .filter(l => l.length >= 3)
+        .map(loop => "M " + loop.map(([x, y]) => `${x} ${y}`).join(" L ") + " Z")
+        .join(" ");
+      if (!d) continue;
+      out.push(
+        <path
+          key={`${keyPrefix}-${i}`}
+          d={d}
+          stroke={style.stroke}
+          strokeWidth={(style.strokeWidth ?? 10) * 0.5}
+          strokeOpacity={style.strokeOpacity ?? 0.5}
+          fill={style.fill ?? style.stroke ?? "#94a3b8"}
+          fillOpacity={style.fillOpacity ?? 0.15}
+          fillRule="evenodd"
+        />,
+      );
     }
-    // ARC / HATCH / TEXT / DIMENSION are intentionally ignored here —
-    // they're either decorative or already handled by other render paths.
+    // ARC / TEXT / DIMENSION are intentionally ignored — they're handled
+    // elsewhere or aren't useful as raw SVG lines.
   }
   return out;
 }
@@ -414,7 +437,10 @@ const StaticLayers = memo(function StaticLayers({
             })
       )}
 
-      {/* Columns / slab outlines — raw with typed fallback. */}
+      {/* Columns / slab outlines / slab info — raw with typed fallback.
+          スラブ情報 (F308 スラブラベル, F155 スラブレベルハッチング) is
+          rendered alongside so the slab hatching that defines floor
+          regions becomes visible. */}
       {layers.column && (
         universalEntities && layerCategories ? (
           <>
@@ -427,6 +453,12 @@ const StaticLayers = memo(function StaticLayers({
               universalEntities, layerCategories, "スラブ外形",
               { stroke: "#7c3aed", strokeWidth: 18, strokeOpacity: 0.4 },
               "so-raw",
+            )}
+            {renderRawEntitiesByCategory(
+              universalEntities, layerCategories, "スラブ情報",
+              { stroke: "#94a3b8", strokeWidth: 8, strokeOpacity: 0.4,
+                fill: "#cbd5e1", fillOpacity: 0.18 },
+              "si-raw",
             )}
           </>
         ) : (

@@ -146,8 +146,41 @@ def _flatten_dxf(filepath: str | Path) -> UniversalDump:
                 props["measurement"] = float(getattr(e.dxf, "actual_measurement", 0.0) or 0.0)
                 props["text"] = getattr(e.dxf, "text", "") or ""
             elif t == "HATCH":
-                # HATCH has no single insertion point; skip pos.
                 props["pattern"] = getattr(e.dxf, "pattern_name", "") or ""
+                # Extract boundary loops as polylines so the drawing view
+                # can fill them. ezdxf exposes both PolylinePath (with
+                # `vertices`) and EdgePath (with `edges`); we flatten both
+                # to their vertex / endpoint lists. Pattern lines (the
+                # actual diagonal hatching) are NOT recreated — too costly
+                # to mirror in SVG. Outlining the boundary + faint fill
+                # gives the user the same "where is the slab" signal.
+                try:
+                    loops: list[list[list[float]]] = []
+                    for path in e.paths:
+                        pts: list[list[float]] = []
+                        if hasattr(path, "vertices") and getattr(path, "vertices", None):
+                            for v in path.vertices:
+                                pts.append([float(v[0]), float(v[1])])
+                        elif hasattr(path, "edges"):
+                            for ed in path.edges:
+                                # Line edges have start/end; arcs have
+                                # center+radius. We sample the endpoints
+                                # of each edge — close enough for layout.
+                                start = getattr(ed, "start", None)
+                                if start is not None and len(start) >= 2:
+                                    pts.append([float(start[0]), float(start[1])])
+                                end = getattr(ed, "end", None)
+                                if end is not None and len(end) >= 2:
+                                    pts.append([float(end[0]), float(end[1])])
+                        if len(pts) >= 3:
+                            loops.append(pts)
+                    if loops:
+                        props["loops"] = loops
+                        # Use the first loop's first vertex as a stable
+                        # position so spatial joins work.
+                        pos = (float(loops[0][0][0]), float(loops[0][0][1]))
+                except Exception:
+                    pass
             elif t == "VIEWPORT":
                 try:
                     pos = (float(e.dxf.center.x), float(e.dxf.center.y))
