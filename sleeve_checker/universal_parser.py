@@ -113,18 +113,27 @@ def _flatten_dxf(filepath: str | Path) -> UniversalDump:
                 pos = (float(e.dxf.center.x), float(e.dxf.center.y))
             elif t in ("LWPOLYLINE", "POLYLINE"):
                 try:
-                    pts = list(e.get_points()) if t == "LWPOLYLINE" else [
-                        (float(v.dxf.location.x), float(v.dxf.location.y)) for v in e.vertices
-                    ]
-                    if pts:
-                        x = float(pts[0][0])
-                        y = float(pts[0][1])
-                        pos = (x, y)
-                        xs = [float(p[0]) for p in pts]
-                        ys = [float(p[1]) for p in pts]
+                    if t == "LWPOLYLINE":
+                        raw_pts = list(e.get_points())
+                        # get_points returns (x, y, start_width, end_width, bulge);
+                        # keep only x,y for the geometry consumer.
+                        flat = [(float(p[0]), float(p[1])) for p in raw_pts]
+                    else:
+                        flat = [
+                            (float(v.dxf.location.x), float(v.dxf.location.y))
+                            for v in e.vertices
+                        ]
+                    if flat:
+                        pos = flat[0]
+                        xs = [p[0] for p in flat]
+                        ys = [p[1] for p in flat]
                         props["bbox"] = [min(xs), min(ys), max(xs), max(ys)]
-                        props["vertex_count"] = len(pts)
+                        props["vertex_count"] = len(flat)
                         props["closed"] = bool(getattr(e, "is_closed", False) or getattr(e, "closed", False))
+                        # Full vertex list — needed by the drawing view to
+                        # render every polyline on a layer regardless of
+                        # whether it's closed.
+                        props["vertices"] = [list(p) for p in flat]
                 except Exception:
                     pass
             elif t == "POINT":

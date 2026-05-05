@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { FloorData, Sleeve, CheckResult } from "./types";
 import { getFloors, parseFloor, runChecks, uploadDxf, uploadDwg, uploadIfc } from "./api";
+import { useUniversalEntities } from "./useUniversalEntities";
 import DrawingView from "./components/DrawingView";
 import SleeveInfo from "./components/SleeveInfo";
 import ListView from "./components/ListView";
@@ -110,6 +111,13 @@ function App() {
   const floorData = activeFloor.data;
   const results = activeFloor.results;
   const displaySleeve = hoveredSleeve || selectedSleeve;
+
+  // Fetch the universal entity dump for whichever floor is active. The
+  // DrawingView and DataExplorer both consume it; the hook caches the
+  // result so we only pay once per floor per session.
+  const { data: universalEntities } = useUniversalEntities(
+    activeFloor.id || null,
+  );
 
   // Lower floor (level − 1) for wall-interference overlay and inter-floor checks.
   const lowerFloor = findLowerFloor(floors, activeFloor.id);
@@ -468,6 +476,8 @@ function App() {
                 <DrawingView
                   floorData={floorData}
                   lowerFloorData={layers.lowerWall ? lowerFloorData : null}
+                  universalEntities={universalEntities?.entities ?? null}
+                  layerCategories={universalEntities?.layer_categories ?? null}
                   results={results}
                   onSleeveHover={setHoveredSleeve}
                   onSleeveClick={setSelectedSleeve}

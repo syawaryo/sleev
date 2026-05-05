@@ -1,18 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { FloorData } from "../types";
-import { getAllEntities, type AllEntitiesResponse, type UniversalEntity } from "../api";
+import type { UniversalEntity } from "../api";
+import { useUniversalEntities } from "../useUniversalEntities";
 
 interface Props {
   floorData: FloorData;
   floorId: string | null;
   onNavigate: (coords: [number, number], sleeveId?: string | null) => void;
 }
-
-// Module-level cache so the response survives tab switches.
-// Without this, switching to "図面" and back to "データ" remounts the
-// component, resets state, and re-fires the (slow) backend call.
-const _responseCache = new Map<string, AllEntitiesResponse>();
-const _inflight = new Map<string, Promise<AllEntitiesResponse>>();
 
 interface EntityRow {
   id: string;
@@ -160,47 +155,10 @@ function sleeveDisciplineCategory(discipline: string, layer: string): string {
 // ---------------------------------------------------------------------------
 
 export default function DataExplorer({ floorData, floorId, onNavigate }: Props) {
-  const [universal, setUniversal] = useState<AllEntitiesResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { data: universal, loading } = useUniversalEntities(floorId);
   const [query, setQuery] = useState("");
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
-
-  useEffect(() => {
-    if (!floorId) return;
-
-    // Show cached response immediately — no flicker on tab return.
-    const cached = _responseCache.get(floorId);
-    if (cached) {
-      setUniversal(cached);
-      setLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setLoading(true);
-    // Don't clear `universal` here: keeping the previous payload visible
-    // while a refetch is in flight is better UX than going blank.
-
-    // De-duplicate concurrent fetches for the same floor.
-    let promise = _inflight.get(floorId);
-    if (!promise) {
-      promise = getAllEntities(floorId).then((u) => {
-        _responseCache.set(floorId, u);
-        return u;
-      }).finally(() => {
-        _inflight.delete(floorId);
-      });
-      _inflight.set(floorId, promise);
-    }
-
-    promise
-      .then((u) => { if (!cancelled) setUniversal(u); })
-      .catch((err) => { console.error("all_entities failed:", err); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-
-    return () => { cancelled = true; };
-  }, [floorId]);
 
   // Sleeve lookup by rounded coordinate so we can swap raw labels for
   // the discipline-aware sleeve summary.

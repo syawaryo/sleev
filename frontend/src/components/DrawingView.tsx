@@ -1,5 +1,6 @@
 import { useMemo, useState, useRef, useCallback, useEffect, memo } from "react";
 import type { FloorData, Sleeve, CheckResult } from "../types";
+import type { UniversalEntity } from "../api";
 
 type LayerKey = "grid" | "wall" | "outerWall" | "step" | "recess" | "column" | "beam" | "sleeve" | "dim" | "lowerWall" | "slabLevel" | "flZone" | "raw" | "room";
 type DisciplineKey = "衛生" | "空調" | "電気" | "その他";
@@ -7,6 +8,11 @@ type DisciplineKey = "衛生" | "空調" | "電気" | "その他";
 interface Props {
   floorData: FloorData;
   lowerFloorData: FloorData | null;
+  // Optional: every DXF/IFC entity flat-listed, plus per-layer category
+  // mapping. Used for "show every shape on this layer" rendering paths
+  // that bypass the strict typed extractors in parser.py.
+  universalEntities?: UniversalEntity[] | null;
+  layerCategories?: Record<string, string> | null;
   results: CheckResult[];
   onSleeveHover: (sleeve: Sleeve | null) => void;
   onSleeveClick: (sleeve: Sleeve | null) => void;
@@ -58,6 +64,88 @@ const MAX_ZOOM_W = 500000;
 type ViewBox = { x: number; y: number; w: number; h: number };
 type DataBounds = { minX: number; maxX: number; minY: number; maxY: number };
 type LayersState = Props["layers"];
+
+interface RawStyle {
+  stroke?: string;
+  strokeWidth?: number;
+  strokeOpacity?: number;
+  strokeDasharray?: string;
+  fill?: string;
+  fillOpacity?: number;
+}
+
+/**
+ * Render every universal entity whose layer is classified into the given
+ * category. Used by drawing toggles whose semantic meaning is "show every
+ * shape on this layer", so we paint the raw geometry — closed polygons
+ * become filled paths, open polylines / lines become strokes.
+ */
+function renderRawEntitiesByCategory(
+  entities: UniversalEntity[],
+  layerCategories: Record<string, string>,
+  category: string,
+  style: RawStyle,
+  keyPrefix: string,
+): JSX.Element[] {
+  const out: JSX.Element[] = [];
+  for (let i = 0; i < entities.length; i++) {
+    const e = entities[i];
+    if (layerCategories[e.layer] !== category) continue;
+
+    const t = e.type;
+    if (t === "LINE") {
+      const s = e.props?.start;
+      const en = e.props?.end;
+      if (!Array.isArray(s) || !Array.isArray(en)) continue;
+      out.push(
+        <line
+          key={`${keyPrefix}-${i}`}
+          x1={s[0]} y1={s[1]} x2={en[0]} y2={en[1]}
+          stroke={style.stroke}
+          strokeWidth={style.strokeWidth}
+          strokeOpacity={style.strokeOpacity}
+          strokeDasharray={style.strokeDasharray}
+        />,
+      );
+    } else if (t === "LWPOLYLINE" || t === "POLYLINE") {
+      const verts: number[][] | undefined = e.props?.vertices;
+      if (!verts || verts.length === 0) continue;
+      const closed = !!e.props?.closed;
+      const d = "M " + verts.map(([x, y]) => `${x} ${y}`).join(" L ") + (closed ? " Z" : "");
+      out.push(
+        <path
+          key={`${keyPrefix}-${i}`}
+          d={d}
+          stroke={style.stroke}
+          strokeWidth={style.strokeWidth}
+          strokeOpacity={style.strokeOpacity}
+          strokeDasharray={style.strokeDasharray}
+          fill={closed ? (style.fill ?? "none") : "none"}
+          fillOpacity={closed ? style.fillOpacity : undefined}
+        />,
+      );
+    } else if (t === "CIRCLE") {
+      const cx = e.pos?.[0];
+      const cy = e.pos?.[1];
+      const r = e.props?.radius;
+      if (cx == null || cy == null || !r) continue;
+      out.push(
+        <circle
+          key={`${keyPrefix}-${i}`}
+          cx={cx} cy={cy} r={r}
+          stroke={style.stroke}
+          strokeWidth={style.strokeWidth}
+          strokeOpacity={style.strokeOpacity}
+          fill={style.fill ?? "none"}
+          fillOpacity={style.fillOpacity}
+        />,
+      );
+    }
+    // ARC / HATCH / TEXT / DIMENSION are intentionally ignored here —
+    // they're either decorative or already handled by other render paths.
+  }
+  return out;
+}
 type SleeveFilters = Props["sleeveFilters"];
 type SeverityMap = Map<string, "NG" | "WARNING" | "OK">;
 
@@ -207,6 +295,17 @@ const StaticLayers = memo(function StaticLayers({
         </g>
       ))}
 
+      {/* Raw "grid line" geometry — every line on a 通り芯-classified
+          layer, regardless of length. Renders behind the typed grid
+          frame so the bubbled axis labels stay legible. */}
+      {layers.grid && universalEntities && layerCategories &&
+        renderRawEntitiesByCategory(
+          universalEntities, layerCategories, "通り芯",
+          { stroke: "#1f2937", strokeWidth: 8, strokeOpacity: 0.35 },
+          "g-raw",
+        )
+      }
+
       {/* Grid lines + axis-label bubbles — solid thin line, darker than
           walls so they still read as the drawing's skeleton. */}
       {layers.grid && gridFrame && floorData.grid_lines.flatMap((g, i) => {
@@ -239,56 +338,77 @@ const StaticLayers = memo(function StaticLayers({
           stroke="#8b5cf6" strokeWidth={40} opacity={0.4} />
       ))}
 
-      {/* Walls */}
-      {floorData.wall_lines.map((w, i) => {
-        const isOuter = wallIsOuter[i];
-        const visible = isOuter ? layers.outerWall : layers.wall;
-        if (!visible) return null;
-        return (
-          <line key={`w${i}`} x1={w.start[0]} y1={w.start[1]} x2={w.end[0]} y2={w.end[1]}
-            stroke={isOuter ? "#111827" : "#64748b"}
-            strokeWidth={isOuter ? 55 : 25}
-            strokeLinecap={isOuter ? "round" : undefined} />
-        );
-      })}
+      {/* Walls — raw render: every entity on a 内壁/外壁-classified layer.
+          The typed wall_lines path was using a bbox heuristic that could
+          drop legitimate exterior walls; honoring the layer name directly
+          guarantees nothing the drafter authored is hidden. */}
+      {layers.outerWall && universalEntities && layerCategories &&
+        renderRawEntitiesByCategory(
+          universalEntities, layerCategories, "外壁",
+          { stroke: "#111827", strokeWidth: 55, strokeOpacity: 1.0 },
+          "ow-raw",
+        )
+      }
+      {layers.wall && universalEntities && layerCategories &&
+        renderRawEntitiesByCategory(
+          universalEntities, layerCategories, "内壁",
+          { stroke: "#64748b", strokeWidth: 25, strokeOpacity: 1.0 },
+          "iw-raw",
+        )
+      }
 
-      {/* Recess polygons (床ヌスミ) — rendered as translucent fills so they read
-          as "floor depressions" rather than "step lines". */}
-      {layers.recess && floorData.recess_polygons?.map((rp, i) => {
-        const d = rp.vertices.length
-          ? "M " + rp.vertices.map(([x, y]) => `${x} ${y}`).join(" L ") + " Z"
-          : "";
-        if (!d) return null;
-        return (
-          <path key={`r${i}`} d={d}
-            fill="#0ea5e9" fillOpacity={0.22}
-            stroke="#0369a1" strokeWidth={15} strokeOpacity={0.7}
-            strokeDasharray="60 30" />
-        );
-      })}
+      {/* Recess (床ヌスミ) — show every entity on a 床ヌスミ-classified layer
+          so we don't miss recess boundaries that happen to be authored as
+          open polylines or individual LINE segments. The strict
+          `floorData.recess_polygons` (closed polygons only) is the source
+          of truth for the check engine, but the drawing view should
+          paint everything that lives on the layer. */}
+      {layers.recess && universalEntities && layerCategories &&
+        renderRawEntitiesByCategory(
+          universalEntities, layerCategories, "床ヌスミ",
+          { stroke: "#0369a1", strokeWidth: 15, fill: "#0ea5e9", fillOpacity: 0.22, strokeOpacity: 0.8, strokeDasharray: "60 30" },
+          "r-raw",
+        )
+      }
 
-      {/* Step lines — FL-verified: hide "spurious" (same FL both sides),
-          dim "unknown" so the eye focuses on confirmed steps. */}
-      {layers.step && floorData.step_lines.map((s, i) => {
-        if (s.fl_status === "spurious") return null;
-        const opacity = s.fl_status === "real" ? 0.9 : 0.5;
-        return (
-          <line key={`s${i}`} x1={s.start[0]} y1={s.start[1]} x2={s.end[0]} y2={s.end[1]}
-            stroke="#d97706" strokeWidth={25} opacity={opacity} />
-        );
-      })}
+      {/* Step lines — raw: every entity on a 段差線-classified layer.
+          Includes building-perimeter lines that happen to live on the
+          step layer; the user explicitly asked for layer-name fidelity
+          rather than length-based filtering. */}
+      {layers.step && universalEntities && layerCategories &&
+        renderRawEntitiesByCategory(
+          universalEntities, layerCategories, "段差線",
+          { stroke: "#d97706", strokeWidth: 25, strokeOpacity: 0.9 },
+          "s-raw",
+        )
+      }
 
-      {/* Column / wall-finish lines */}
-      {layers.column && floorData.column_lines.map((c, i) => (
-        <line key={`col${i}`} x1={c.start[0]} y1={c.start[1]} x2={c.end[0]} y2={c.end[1]}
-          stroke="#7c3aed" strokeWidth={20} opacity={0.6} />
-      ))}
+      {/* Column / wall-finish lines — raw: every entity on a
+          柱・仕上線-classified layer. Also includes スラブ外形 because
+          the column toggle historically covers slab outlines too. */}
+      {layers.column && universalEntities && layerCategories && (
+        <>
+          {renderRawEntitiesByCategory(
+            universalEntities, layerCategories, "柱・仕上線",
+            { stroke: "#7c3aed", strokeWidth: 20, strokeOpacity: 0.6 },
+            "col-raw",
+          )}
+          {renderRawEntitiesByCategory(
+            universalEntities, layerCategories, "スラブ外形",
+            { stroke: "#7c3aed", strokeWidth: 18, strokeOpacity: 0.4 },
+            "so-raw",
+          )}
+        </>
+      )}
 
-      {/* Beams (梁) — lighter purple, dashed, to distinguish from columns/walls */}
-      {layers.beam && (floorData.beam_lines || []).map((b, i) => (
-        <line key={`bm${i}`} x1={b.start[0]} y1={b.start[1]} x2={b.end[0]} y2={b.end[1]}
-          stroke="#a855f7" strokeWidth={10} strokeDasharray="200 100" opacity={0.7} />
-      ))}
+      {/* Beams (梁) — raw: every entity on a 梁-classified layer. */}
+      {layers.beam && universalEntities && layerCategories &&
+        renderRawEntitiesByCategory(
+          universalEntities, layerCategories, "梁",
+          { stroke: "#a855f7", strokeWidth: 10, strokeDasharray: "200 100", strokeOpacity: 0.7 },
+          "bm-raw",
+        )
+      }
 
       {/* Dimension lines */}
       {layers.dim && floorData.dim_lines.map((d, i) => {
@@ -521,7 +641,8 @@ const HighlightLayer = memo(function HighlightLayer({ coords }: HighlightLayerPr
 // ---------------------------------------------------------------------------
 
 function DrawingViewInner({
-  floorData, lowerFloorData, results, onSleeveHover, onSleeveClick,
+  floorData, lowerFloorData, universalEntities, layerCategories,
+  results, onSleeveHover, onSleeveClick,
   selectedSleeveId, layers, sleeveFilters, navigateTarget, onNavigated, highlightCoords,
   pdfOverlayUrl, pdfOverlayOpacity = 0.4,
   onToggleLayer, onToggleSleeveFilter, sleeveCounts,
