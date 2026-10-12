@@ -32,7 +32,7 @@ def main():
         page.on("request", lambda req: api_calls.append(req.url) if "/api/" in req.url else None)
         page.goto(URL)
         expect(page.get_by_role("region", name="チェック結果一覧")).to_be_visible()
-        assert page.get_by_role("tab").all_text_contents() == ["チェック結果", "図面", "チェック観点", "図面データ"]
+        assert page.get_by_role("tab").all_text_contents() == ["チェック観点", "図面", "チェック結果", "図面データ"]
         expect(page.get_by_text("オフライン利用準備済み")).to_be_visible(timeout=60000)
         assert page.get_by_text("チェック実行", exact=True).count() == 0
         assert page.locator("[data-check-id]").count() == 13
@@ -114,7 +114,7 @@ def main():
         page.keyboard.press("End")
         expect(page.get_by_role("tab", name="図面データ", exact=True)).to_be_focused()
         page.keyboard.press("ArrowLeft")
-        expect(page.get_by_role("tab", name="チェック観点", exact=True)).to_have_attribute("aria-selected", "true")
+        expect(page.get_by_role("tab", name="チェック結果", exact=True)).to_have_attribute("aria-selected", "true")
 
         # A fresh reload while offline needs no analysis server or user rerun.
         page.wait_for_function("navigator.serviceWorker.controller !== null")

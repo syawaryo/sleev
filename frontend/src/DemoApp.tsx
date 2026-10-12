@@ -8,7 +8,7 @@ import CriterionLink from "./components/CriterionLink";
 
 const DrawingView = lazy(() => import("./components/DrawingView"));
 const DemoDataView = lazy(() => import("./components/DemoDataView"));
-const tabs = [["list", "チェック結果"], ["drawing", "図面"], ["checklist", "チェック観点"], ["data", "図面データ"]] as const;
+const tabs = [["checklist", "チェック観点"], ["drawing", "図面"], ["list", "チェック結果"], ["data", "図面データ"]] as const;
 type View = typeof tabs[number][0];
 const initialLayers = {
   grid: true, kutaiheki: true, kanshikiheki: true, firewall: true, column: true,
@@ -139,7 +139,6 @@ export default function DemoApp() {
         <input aria-label="P-N番号で検索" value={search} placeholder="P-N番号で検索 (例 12)"
           onChange={(e) => { setSearch(e.target.value); setSearchError(""); }}
           style={{ padding: "5px 10px", fontSize: 12, width: 160, border: `1px solid ${searchError ? "#dc2626" : "#d1d5db"}`, borderRadius: 6, background: searchError ? "#fef2f2" : "#fff" }} />
-        <button type="submit" style={{ ...buttonStyle, padding: "5px 10px" }}>飛ぶ</button>
       </form>
       <button onClick={() => window.print()} style={{ ...buttonStyle, padding: "5px 12px" }}>PDF出力</button>
     </header>
@@ -151,6 +150,7 @@ export default function DemoApp() {
           {f.label}<span style={{ fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 3, background: "#f3f4f6", color: "#6b7280", letterSpacing: 0.3 }}>DXF</span>
         </button>)}
       </div>
+      <button type="button" disabled title="図面追加（表示のみ）" style={{ ...buttonStyle, cursor: "default", whiteSpace: "nowrap" }}>＋ 図面を追加</button>
       <span role="status" style={{ marginLeft: "auto", color: "#9ca3af", fontSize: 11 }}>{offlineReady ? "オフライン利用準備済み" : offlineError ? "オフライン保存できませんでした" : import.meta.env.PROD && "serviceWorker" in navigator ? "オフライン利用の準備中…" : ""}</span>
     </div>
     <div className="no-print" style={{ padding: "5px 20px", background: "#fff", borderBottom: "1px solid #e5e7eb", color: "#6b7280", fontSize: 11 }}>
