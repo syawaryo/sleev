@@ -1,73 +1,75 @@
-# React + TypeScript + Vite
+# スリーブ図チェック・展示デモ
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+展示版は、元の配色・一覧・図面右側の詳細欄を保ち、実図面を既存の13項目で事前チェックした結果を初期表示します。「チェック結果」「図面」「チェック観点」「図面データ」の4タブで、右パネルの基準カード全体から対応するチェック観点へ移動できます。Python API・DB・AI APIは閲覧時に使いません。
 
-Currently, two official plugins are available:
+## 起動・ビルド
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+リポジトリルートで `python -m pip install -r requirements-demo.txt`、`frontend` で `npm ci` を実行します。
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```powershell
+# frontend ディレクトリ
+npm run build
+npm run preview -- --host 127.0.0.1 --port 4173
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+`http://localhost:4173/` を開きます。`npm run build` はDXFを再解析し、チェック結果と描画用データを `public/demo/` に生成してから `dist/` を作ります。生成データはGitに登録しません。既存キャッシュや可変のチェック定義には依存せず、組込みの13項目を使用します。座標の小数丸めは判定後の表示用データだけに適用します。
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+図面データは同じDXFを `universal_parser.flatten` で読み取った全要素を、元のデータ一覧で種類・レイヤーごとに集計します。件数・テキスト・位置・寸法値を保持し、表で使わない描画用プロパティは省きます。分類は既存ルールを使用し、未分類を含む「その他の要素」も初期表示に含めます。データの読込・集計はタブを開いたときに行い、オフライン保存には両階分を含めます。展示版では分類編集は行いません。
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+画面開発時は `npm run demo:data` の後で `npm run dev`。従来のアップロード・解析・チェック定義編集・データ分類画面は `npm run dev:workspace` で起動します（別途FastAPIが必要）。従来版のビルドは `npm run build:workspace`、コンテナは `Dockerfile.workspace` を使用します。
+
+## 展示環境
+
+- `dist/` を静的配信できれば動作します。常駐する解析サーバーや永続ディスクは不要です。
+- 静的配信用コンテナはルートの `Dockerfile`（`Dockerfile.demo` と同じ構成）。実行イメージはnginxだけで、ポートは10000です。JSON/JS/CSSをgzip配信します。
+- 初回は接続した状態で「オフライン利用準備済み」が出るまで待ちます。サービスワーカーが両階の図面と画面コードを保存するため、その後はオフラインでリロード・階切替・図面表示ができます。
+- iPadでオフライン保存するにはHTTPSが必要です。PCのlocalhostは開発用の例外ですが、LAN内のHTTPアドレスではサービスワーカーを使えません。Safariが保存データを削除した場合は接続して開き直してください。
+- バージョン更新時は展示タブをすべて閉じて開き直します。新しい一式の保存が完了するまでは、現在の版を維持します。
+- 既存の公開先は `https://sleev.onrender.com/`、連携リポジトリは `syawaryo/sleev` の `master` です。ルートの `Dockerfile` で展示版を配信します。`render.yaml` の既存契約・サービス数・プランは変更していません。
+
+## 展示で説明する仕組み
+
+### 判定とAI
+
+この展示版のOK/NGは、Pythonに実装された決まった条件・寸法・幾何計算による判定です。図面で学習する処理はリポジトリ内にはありません。従来の管理版ではAIによるレイヤー分類と、自由記述からチェックコードを生成する機能がありますが、展示版の閲覧・データ生成では呼びません。判定結果は、表示している生成日時のスナップショットです。
+
+### チェックリストとの対応
+
+以下は現在の `sleeve_checker/check_registry.py` の組込み項目との対応です。先方支給の原本はこの作業場所では確認できていないため、原本の行番号・文言との一致は未確認です。画面でも原本確認済みとは表記していません。
+
+| 番号 | 項目 | 主な判定 |
+|---|---|---|
+| #2 | 設備種別記載 | スリーブ近傍の設備種別コード |
+| #3 | 口径・外径記載 | 口径と外径の表記、角スリーブの寸法 |
+| #4 | 寸法合計 | 寸法チェーンと通り芯間距離 |
+| #5 | 勾配記載 | 排水スリーブ付近のFL・勾配情報 |
+| #6 | 下階壁干渉 | 縦スリーブと直下階の壁の干渉 |
+| #7 | 段差近接 | 段差線・床ヌスミとの関係 |
+| #8 | 基準レベル記載 | 横スリーブのレベル寸法 |
+| #9 | 位置特定寸法 | X/Y方向の寸法から通り芯への到達 |
+| #10 | 段差基準寸法 | 寸法参照点に段差・ヌスミ線を使っていないか |
+| #11 | スリーブ芯寸法 | スリーブ芯の寸法チェーンが通り芯へ帰着するか |
+| #12 | 柱・壁仕上寸法 | 寸法参照点が柱外周・壁仕上線にないか |
+| #13 | 寸法表記統一 | 寸法の表記形式 |
+| #14 | スリーブ番号記載 | P-N番号との紐付け |
+
+#1は既存設計書で「根拠図なし」のため対象外です。旧設計書冒頭には「15項目のうち14項目」とありますが、同書の表と現コードは#2〜#14の13項目で一致していません。追加除外の有無は原本照合が必要であり、#15の内容・除外理由は推測できません。下階図面がない1階の#6など、結果が0件の項目は「未判定・対象なし」と表示します。スリーブ0件もOK扱いしません。
+
+### PDFへの対応
+
+現在の自動チェック入力はDXF・DWG（DXF変換）・IFCです。従来版のPDF機能は1ページ目を画像にして図面へ重ねる表示機能で、PDFからスリーブを読み取って判定する機能ではありません。展示版は準備した2つのDXFを使用します。
+
+### 展示で断定しないこと
+
+- 「AIがすべての判定をする」「顧客図面で学習済み」
+- 「元のチェックリストの全項目を網羅」「どんな図面・PDFでも自動判定」
+- 「OKなら施工上問題ない」「NGは必ず設計の誤り」
+- 「現在ここで新規解析した結果」。展示版は事前に実計算した結果です。
+
+図面の読み取り・番号紐付け・寸法の認識・壁厚などには実装上の前提があり、指摘は担当者が原図と照合して判断します。
+
+## 検証
+
+静的ビルドを4173で配信して、リポジトリルートから `python scripts/check_demo.py` を実行します（別URLは環境変数 `DEMO_URL`）。Playwright Chromiumで4タブ、基準カード全体からの移動、図面に戻った際の位置保持、全要素の集計件数と検索、キーボード操作、NG/OKからの移動、タッチ移動・ピンチ、オフラインでの再読込・階切替・データ表示、対象0件、通信エラー後の再読込を確認します。検証画像は `tmp/demo-qa/` に出力します。
+
+既存ロジックの検証: `python -m pytest tests/test_check_registry.py tests/test_geometry.py -q -p no:cacheprovider`。`tests/test_checks.py` は現コードに存在しない旧関数 `check_fl_label` をimportしているため、今回の変更前から収集に失敗します。

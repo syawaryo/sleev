@@ -2,7 +2,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.workspace
     command: >
       uvicorn api:app
       --host 0.0.0.0
@@ -35,7 +35,7 @@ services:
   frontend:
     image: node:22-slim
     working_dir: /app/frontend
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    command: sh -c "npm install && npm run dev:workspace -- --host 0.0.0.0 --port 5173"
     ports:
       - "5173:5173"
     volumes:

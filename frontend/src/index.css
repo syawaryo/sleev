@@ -1,6 +1,22 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #f8fafc; color: #111827; }
 
+.criterion-link:hover { background: #f1f5f9 !important; border-color: #64748b !important; }
+.criterion-link:focus-visible { outline: 2px solid #475569; outline-offset: 2px; }
+.criterion-link:active { background: #e2e8f0 !important; }
+
+.criteria-table { width: 100%; max-width: 1120px; margin: 16px auto 0; border-spacing: 0; border: 1px solid #cbd5e1; table-layout: fixed; font-size: 14px; line-height: 1.8; color: #1f2937; }
+.criteria-table th, .criteria-table td { padding: 13px 16px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.criteria-table th + th, .criteria-table td + th, .criteria-table th + td { border-left: 1px solid #dbe1e8; }
+.criteria-table thead th { position: sticky; top: 0; z-index: 1; background: #e9eef4; color: #334155; font-size: 12px; font-weight: 700; border-bottom: 1px solid #cbd5e1; padding-top: 9px; padding-bottom: 9px; }
+.criteria-table tbody th { font-weight: 700; color: #111827; }
+.criteria-table tbody tr + tr > * { border-top: 1px solid #dbe1e8; }
+.criteria-table tbody tr:nth-child(even) { background: #f8fafc; }
+.criteria-table .criterion-number { font-weight: 700; font-size: 15px; white-space: nowrap; color: #334155; }
+.criteria-table tbody tr[aria-current="true"] { background: #e8eef5; }
+.criteria-table tbody tr[aria-current="true"] > :first-child { box-shadow: inset 4px 0 #334155; }
+.criteria-table tbody tr:focus-visible { outline: 2px solid #475569; outline-offset: -2px; }
+
 /* ---------- Print: PDF output via browser "Save as PDF" ---------- */
 @media print {
   @page { size: A3 landscape; margin: 10mm; }

@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect } from "react";
 import type { FloorData } from "../types";
-import type { UniversalEntity } from "../api";
+import type { AllEntitiesResponse, UniversalEntity } from "../api";
 import { useUniversalEntities } from "../useUniversalEntities";
 
 interface Props {
@@ -10,8 +10,9 @@ interface Props {
   // The map is merged on top of the API-supplied auto classification so
   // the user can correct misclassifications without re-running anything.
   layerOverrides: Record<string, string>;
-  onCategoryChange: (layer: string, category: string | null) => void;
+  onCategoryChange?: (layer: string, category: string | null) => void;
   onNavigate: (coords: [number, number], sleeveId?: string | null) => void;
+  snapshot?: AllEntitiesResponse;
 }
 
 // One row per layer (not per entity).  Per-entity rows produced 18k+
@@ -327,12 +328,15 @@ function CategoryPicker({
 // ---------------------------------------------------------------------------
 
 export default function DataExplorer({
-  floorData, floorId, layerOverrides, onCategoryChange, onNavigate,
+  floorData, floorId, layerOverrides, onCategoryChange, onNavigate, snapshot,
 }: Props) {
-  const { data: universal, loading } = useUniversalEntities(floorId);
+  const remote = useUniversalEntities(snapshot ? null : floorId);
+  const universal = snapshot ?? remote.data;
+  const loading = !snapshot && remote.loading;
+  const groupLabel = (name: string) => snapshot && name === "不要" ? "その他の要素" : displayName(name);
   const [query, setQuery] = useState("");
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
-  const [showHidden, setShowHidden] = useState(false);
+  const [showHidden, setShowHidden] = useState(!!snapshot);
   // Which layer's category-picker popover is open. `null` = none.
   const [pickerLayer, setPickerLayer] = useState<string | null>(null);
 
@@ -530,7 +534,7 @@ export default function DataExplorer({
               whiteSpace: "nowrap",
             }}
           >
-            {showHidden ? "不要候補を隠す" : `不要候補を表示 (${hiddenCount})`}
+            {snapshot ? (showHidden ? "その他の要素を隠す" : `その他の要素を表示 (${hiddenCount.toLocaleString()})`) : (showHidden ? "不要候補を隠す" : `不要候補を表示 (${hiddenCount})`)}
           </button>
         )}
         {loading && <span style={{ fontSize: 11, color: "#9ca3af" }}>読込中…</span>}
@@ -569,7 +573,7 @@ export default function DataExplorer({
             読み込み中...
           </div>
         )}
-        {universal && grouped.length === 0 && headerRows.length === 0 && (
+        {universal && grouped.length === 0 && (query.trim() || headerRows.length === 0) && (
           <div style={{ color: "#9ca3af", textAlign: "center", marginTop: 60, fontSize: 13 }}>
             該当するデータがありません
           </div>
@@ -623,8 +627,10 @@ export default function DataExplorer({
         {grouped.map((g, gi) => {
           const isOpen = openGroups.has(g.name) || autoExpand;
           return (
-            <div key={g.name} style={gi > 0 || headerRows.length > 0 ? { borderTop: "1px solid #f3f4f6" } : undefined}>
+            <div key={g.name} data-group={g.name} data-entity-count={g.entityTotal} style={gi > 0 || headerRows.length > 0 ? { borderTop: "1px solid #f3f4f6" } : undefined}>
               <div
+                role="button" tabIndex={0} aria-expanded={isOpen} aria-label={groupLabel(g.name)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGroup(g.name); } }}
                 onClick={() => toggleGroup(g.name)}
                 style={{
                   padding: "10px 4px",
@@ -651,7 +657,7 @@ export default function DataExplorer({
                 </span>
                 <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                   <span style={{ fontWeight: 500, color: "#111827", letterSpacing: -0.1 }}>
-                    {displayName(g.name)}
+                  {groupLabel(g.name)}
                   </span>
                   <span style={{ fontSize: 10.5, color: "#9ca3af" }}>
                     {g.layers.length} レイヤー / {g.entityTotal.toLocaleString()} 件
@@ -671,6 +677,7 @@ export default function DataExplorer({
                     return (
                       <div
                         key={r.id}
+                        data-layer={r.rawLayer}
                         onClick={() => r.navigate && onNavigate(r.navigate, r.sleeveId)}
                         style={{
                           padding: "6px 4px 6px 32px",
@@ -704,7 +711,7 @@ export default function DataExplorer({
                             <span
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onCategoryChange(r.rawLayer, null);
+                                onCategoryChange?.(r.rawLayer, null);
                               }}
                               style={{
                                 fontSize: 9,
@@ -756,7 +763,7 @@ export default function DataExplorer({
                             </span>
                           )}
                         </div>
-                        <div
+                        {onCategoryChange && <div
                           onClick={(e) => e.stopPropagation()}
                           style={{ position: "relative", flexShrink: 0 }}
                         >
@@ -794,7 +801,7 @@ export default function DataExplorer({
                               onClose={() => setPickerLayer(null)}
                             />
                           )}
-                        </div>
+                        </div>}
                       </div>
                     );
                   })}

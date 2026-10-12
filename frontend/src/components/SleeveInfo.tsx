@@ -1,9 +1,11 @@
 import type { Sleeve, CheckResult, SlabLabel } from "../types";
+import CriterionLink from "./CriterionLink";
 
 interface Props {
   sleeve: Sleeve;
   results: CheckResult[];
   slabLabels?: SlabLabel[];
+  onOpenCriterion?: (id: number) => void;
 }
 
 // Parse sleeve FL annotation like "FL+40", "FL-360", "FL±0" into an integer mm.
@@ -75,7 +77,7 @@ function computeSlabTopText(sleeve: Sleeve, slabLabels: SlabLabel[]): string | n
   return `SL${a >= 0 ? "+" : ""}${a}～${b >= 0 ? "+" : ""}${b}`;
 }
 
-function renderResultCard(r: CheckResult, prefix: string, i: number) {
+function renderResultCard(r: CheckResult, prefix: string, i: number, onOpenCriterion?: (id: number) => void) {
   const isNg = r.severity === "NG";
   const palette = isNg
     ? { bg: "#fef2f2", border: "#ef4444", id: "#dc2626", title: "#991b1b" }
@@ -98,7 +100,7 @@ function renderResultCard(r: CheckResult, prefix: string, i: number) {
       {hasStructured ? (
         <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", rowGap: 3, columnGap: 8 }}>
           {r.target && <Row label="対象" value={r.target} />}
-          {r.rule && <Row label="基準" value={r.rule} />}
+          {r.rule && (onOpenCriterion ? <CriterionLink checkId={r.check_id} rule={r.rule} onOpen={onOpenCriterion} /> : <Row label="基準" value={r.rule} />)}
           {r.expected && <Row label="期待" value={r.expected} />}
           {r.found && <Row label="検出" value={r.found} accent />}
           {r.fix_hint && <Row label="対応" value={r.fix_hint} />}
@@ -106,11 +108,12 @@ function renderResultCard(r: CheckResult, prefix: string, i: number) {
       ) : (
         <div style={{ color: "#6b7280", fontSize: 11 }}>{r.message}</div>
       )}
+      {!r.rule && onOpenCriterion && <CriterionLink checkId={r.check_id} onOpen={onOpenCriterion} />}
     </div>
   );
 }
 
-export default function SleeveInfo({ sleeve, results, slabLabels = [] }: Props) {
+export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCriterion }: Props) {
   const sleeveResults = results.filter((r) => r.sleeve_id === sleeve.id);
   const ngResults = sleeveResults.filter((r) => r.severity === "NG");
   const warnResults = sleeveResults.filter((r) => r.severity === "WARNING");
@@ -145,11 +148,12 @@ export default function SleeveInfo({ sleeve, results, slabLabels = [] }: Props) 
 
   const slabTopText = computeSlabTopText(sleeve, slabLabels);
 
-  const worst = ngResults.length > 0 ? "NG" : warnResults.length > 0 ? "WARNING" : "OK";
+  const worst = ngResults.length > 0 ? "NG" : warnResults.length > 0 ? "WARNING" : okCount ? "OK" : "未判定";
   const badgeStyle: Record<string, { bg: string; color: string }> = {
     NG: { bg: "#fef2f2", color: "#dc2626" },
     WARNING: { bg: "#fffbeb", color: "#d97706" },
     OK: { bg: "#f0fdf4", color: "#16a34a" },
+    未判定: { bg: "#f3f4f6", color: "#6b7280" },
   };
   const badge = badgeStyle[worst];
 
@@ -172,7 +176,7 @@ export default function SleeveInfo({ sleeve, results, slabLabels = [] }: Props) 
           </div></div>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>スラブ天端</div><div style={{ color: "#111827", fontWeight: 600 }}>{slabTopText || sleeve.fl_text || "-"}</div></div>
           <div><div style={{ color: "#9ca3af", fontSize: 10, marginBottom: 2 }}>種別</div><div style={{ color: "#374151" }}>
-            {typeLabel ? `${typeLabel} (${disciplineCode})` : (disciplineCode || "-")}
+            {typeLabel ? (disciplineCode ? `${typeLabel} (${disciplineCode})` : typeLabel) : (disciplineCode || "-")}
           </div></div>
         </div>
       </div>
@@ -183,8 +187,8 @@ export default function SleeveInfo({ sleeve, results, slabLabels = [] }: Props) 
           チェック結果
         </div>
 
-        {ngResults.map((r, i) => renderResultCard(r, "ng", i))}
-        {warnResults.map((r, i) => renderResultCard(r, "w", i))}
+        {ngResults.map((r, i) => renderResultCard(r, "ng", i, onOpenCriterion))}
+        {warnResults.map((r, i) => renderResultCard(r, "w", i, onOpenCriterion))}
 
         {okCount > 0 && (
           <div style={{ color: "#9ca3af", fontSize: 11, marginTop: 8 }}>

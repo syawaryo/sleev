@@ -41,3 +41,7 @@ static/
 
 # Editable check registry (dev state; regenerated from builtins)
 /checks/
+
+# Generated exhibition bundle and local verification artifacts
+/frontend/public/demo/
+/tmp/

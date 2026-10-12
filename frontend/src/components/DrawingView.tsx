@@ -64,6 +64,8 @@ interface Props {
   onPdfFilesSelected: (files: FileList | null) => void;
   onPdfClear: () => void;
   onPdfOpacityChange: (v: number) => void;
+  simplified?: boolean;
+  onToggleLayerGroup?: (keys: LayerKey[]) => void;
 }
 
 const SEVERITY_COLORS: Record<string, { stroke: string; fill: string }> = {
@@ -474,7 +476,7 @@ const StaticLayers = memo(function StaticLayers({
   // compact (~20–80 rects instead of thousands).
   const flZoneTiles = useMemo(() => {
     const zones = floorData.slab_zones || [];
-    if (!dataBounds || zones.length === 0) return [] as { x: number; y: number; w: number; h: number; color: string }[];
+    if (!layers.flZone || !dataBounds || zones.length === 0) return [] as { x: number; y: number; w: number; h: number; color: string }[];
     const { minX, maxX, minY, maxY } = dataBounds;
     const N = 48;
     const cellW = (maxX - minX) / N;
@@ -516,7 +518,7 @@ const StaticLayers = memo(function StaticLayers({
       }
     }
     return tiles;
-  }, [dataBounds, floorData.slab_zones, flColorMap]);
+  }, [dataBounds, floorData.slab_zones, flColorMap, layers.flZone]);
 
   return (
     <>
@@ -999,12 +1001,15 @@ function DrawingViewInner({
   pdfOverlayUrl, pdfOverlayOpacity = 0.4,
   onToggleLayer, onToggleSleeveFilter, sleeveCounts,
   showLowerWallToggle, lowerFloorLabel, onPdfFilesSelected, onPdfClear, onPdfOpacityChange,
+  simplified = false, onToggleLayerGroup,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const [vb, setVb] = useState<ViewBox>(INITIAL_VB);
   const [isPanning, setIsPanning] = useState(false);
-  const panStart = useRef<{ x: number; y: number; vb: ViewBox } | null>(null);
+  const pointers = useRef(new Map<number, [number, number]>());
+  const dragged = useRef(false);
+  const gesture = useRef<{ x: number; y: number; distance: number; anchor: DOMPoint; unit: number; vb: ViewBox } | null>(null);
 
   // Bounds of all drawable entities (loop — spread on 10k+ args overflows the stack).
   const dataBounds = useMemo<DataBounds | null>(() => {
@@ -1093,24 +1098,50 @@ function DrawingViewInner({
     return () => svg.removeEventListener("wheel", handler);
   }, []);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-    setIsPanning(true);
-    panStart.current = { x: e.clientX, y: e.clientY, vb: { ...vb } };
-  }, [vb]);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isPanning || !panStart.current || !svgRef.current) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    const dx = (e.clientX - panStart.current.x) / rect.width * panStart.current.vb.w;
-    const dy = (e.clientY - panStart.current.y) / rect.height * panStart.current.vb.h;
-    setVb({ ...panStart.current.vb, x: panStart.current.vb.x - dx, y: panStart.current.vb.y - dy });
-  }, [isPanning]);
-
-  const handleMouseUp = useCallback(() => {
-    setIsPanning(false);
-    panStart.current = null;
+  const beginGesture = useCallback(() => {
+    const pts = [...pointers.current.values()];
+    const matrix = svgRef.current?.getScreenCTM()?.inverse();
+    if (!pts.length || !matrix) { gesture.current = null; return; }
+    const [a, b = a] = pts;
+    const x = (a[0] + b[0]) / 2, y = (a[1] + b[1]) / 2;
+    gesture.current = { x, y, distance: Math.hypot(a[0] - b[0], a[1] - b[1]),
+      anchor: new DOMPoint(x, y).matrixTransform(matrix), unit: matrix.a, vb: { ...vbRef.current } };
   }, []);
+  const handlePointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.button !== 0) return;
+    if (!pointers.current.size) dragged.current = false;
+    pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
+    (e.target as Element).setPointerCapture(e.pointerId);
+    setIsPanning(true);
+    beginGesture();
+  }, [beginGesture]);
+  const handlePointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    if (!pointers.current.has(e.pointerId) || !gesture.current) return;
+    pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
+    const [a, b = a] = [...pointers.current.values()];
+    const x = (a[0] + b[0]) / 2, y = (a[1] + b[1]) / 2;
+    const g = gesture.current;
+    const distance = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    if (Math.hypot(x - g.x, y - g.y) > 4 || pointers.current.size > 1) dragged.current = true;
+    if (!dragged.current) return;
+    const factor = g.distance && distance ? g.distance / distance : 1;
+    const w = Math.min(MAX_ZOOM_W, Math.max(MIN_ZOOM_W, g.vb.w * factor));
+    const ratio = w / g.vb.w;
+    setVb({ x: g.anchor.x - (g.anchor.x - g.vb.x + (x - g.x) * g.unit) * ratio,
+      y: g.anchor.y - (g.anchor.y - g.vb.y + (y - g.y) * g.unit) * ratio,
+      w, h: g.vb.h * ratio });
+  }, []);
+  const handlePointerUp = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    pointers.current.delete(e.pointerId);
+    setIsPanning(pointers.current.size > 0);
+    beginGesture();
+  }, [beginGesture]);
+
+  const zoom = (factor: number) => setVb((cur) => {
+    const w = Math.min(MAX_ZOOM_W, Math.max(MIN_ZOOM_W, cur.w * factor));
+    const h = cur.h * w / cur.w;
+    return { x: cur.x + (cur.w - w) / 2, y: cur.y + (cur.h - h) / 2, w, h };
+  });
 
   const handleDoubleClick = useCallback(() => setVb(fitVb()), [fitVb]);
 
@@ -1209,7 +1240,28 @@ function DrawingViewInner({
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#fdfdfe" }}>
       {/* Toolbar */}
-      <div className="no-print" style={{
+      {simplified && <div className="no-print" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "6px 12px", background: "#fff", borderBottom: "1px solid #f3f4f6" }}>
+        <span style={{ color: "#9ca3af", fontSize: 10 }}>レイヤー</span>
+        {([
+          ["通り芯（基準線）", ["grid"]],
+          ["壁・柱・床", ["kutaiheki", "kanshikiheki", "firewall", "column", "slabOutline"]],
+          ["段差・凹み", ["step", "recess"]],
+          ["位置寸法", ["dim"]],
+          ["スリーブ・番号", ["sleeve", "pn"]],
+          ...(showLowerWallToggle ? [["干渉を調べる下階壁", ["lowerWall"]]] : []),
+        ] as [string, LayerKey[]][]).map(([label, keys]) => <button key={label}
+          aria-pressed={keys.every((key) => layers[key])} onClick={() => onToggleLayerGroup?.(keys)}
+          style={{ padding: "2px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10,
+            border: `1px solid ${keys.every((key) => layers[key]) ? "#9ca3af" : "#e5e7eb"}`,
+            background: keys.every((key) => layers[key]) ? "#f3f4f6" : "#fff", color: keys.every((key) => layers[key]) ? "#374151" : "#9ca3af" }}>{label}</button>)}
+        <div style={{ display: "flex", gap: 5, marginLeft: "auto" }}>
+          <button aria-label="図面を拡大" onClick={() => zoom(0.75)} style={{ padding: "2px 6px", borderRadius: 4, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", fontSize: 10, cursor: "pointer" }}>＋</button>
+          <button aria-label="図面を縮小" onClick={() => zoom(1.33)} style={{ padding: "2px 6px", borderRadius: 4, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", fontSize: 10, cursor: "pointer" }}>−</button>
+          <button onClick={handleDoubleClick} style={{ padding: "2px 8px", borderRadius: 4, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", fontSize: 10, cursor: "pointer" }}>全体表示</button>
+        </div>
+        <div style={{ fontSize: 10, color: "#6b7280" }}><span style={{ color: "#dc2626" }}>● NG</span>　<span style={{ color: "#d97706" }}>● 要確認</span>　<span style={{ color: "#16a34a" }}>● OK</span></div>
+      </div>}
+      {!simplified && <div className="no-print" style={{
         display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6,
         padding: "6px 12px", background: "#fff",
         borderBottom: "1px solid #f3f4f6",
@@ -1314,18 +1366,19 @@ function DrawingViewInner({
               }}>×</button>
           </>
         )}
-      </div>
+      </div>}
 
       {/* SVG */}
       <svg
         ref={svgRef}
         viewBox={viewBox}
-        style={{ flex: 1, width: "100%", background: "#fdfdfe", cursor: isPanning ? "grabbing" : "grab" }}
+        style={{ flex: 1, minHeight: 0, width: "100%", background: "#fdfdfe", cursor: isPanning ? "grabbing" : "grab", touchAction: "none" }}
         xmlns="http://www.w3.org/2000/svg"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onClickCapture={(e) => { if (dragged.current) { e.preventDefault(); e.stopPropagation(); } }}
         onDoubleClick={handleDoubleClick}
       >
       <g transform="scale(1,-1)">

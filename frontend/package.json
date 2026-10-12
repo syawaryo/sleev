@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "demo:data": "python ../scripts/export_demo.py",
+    "dev:workspace": "vite --mode workspace",
+    "build": "npm run demo:data && tsc -b && vite build && node scripts/build-offline.mjs",
+    "build:workspace": "tsc -b && vite build --mode workspace",
     "lint": "eslint .",
     "preview": "vite preview"
   },

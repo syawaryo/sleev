@@ -1,0 +1,3 @@
+# Build-time only. Serving the finished demo requires no Python dependencies.
+ezdxf>=1.0
+numpy>=1.26
