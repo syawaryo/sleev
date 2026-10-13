@@ -4,7 +4,7 @@ import { listFloorData, loadDrawing, loadManifest } from "./demoData";
 import type { DemoManifest } from "./demoData";
 import ListView from "./components/ListView";
 import SleeveInfo from "./components/SleeveInfo";
-import CriterionLink from "./components/CriterionLink";
+import FocusedCheckResult from "./components/FocusedCheckResult";
 
 const DrawingView = lazy(() => import("./components/DrawingView"));
 const DemoDataView = lazy(() => import("./components/DemoDataView"));
@@ -43,6 +43,7 @@ export default function DemoApp() {
   const [offlineReady, setOfflineReady] = useState(false);
   const [offlineError, setOfflineError] = useState(false);
   const checklistRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
   const focusCriterion = useRef(false);
   const onNavigated = useCallback(() => setTarget(null), []);
 
@@ -87,6 +88,10 @@ export default function DemoApp() {
     }
   }, [criterion, view]);
 
+  useEffect(() => {
+    if (view === "drawing" && sidebarRef.current) sidebarRef.current.scrollTop = 0;
+  }, [view, selectedResult, selected?.id, activeId]);
+
   const openCriterion = (id: number) => { focusCriterion.current = true; setCriterion(id); setView("checklist"); };
   const navigate = (coords: [number, number], sleeveId?: string, points?: [number, number][], result?: CheckResult) => {
     setDrawingError("");
@@ -100,9 +105,9 @@ export default function DemoApp() {
     setTarget(coords);
     setView("drawing");
   };
-  const openOverview = () => {
+  const openOverview = (result?: CheckResult) => {
     setDrawingError("");
-    setSelected(null); setSelectedResult(null); setTarget(null); setHighlights([]);
+    setSelected(null); setSelectedResult(result ?? null); setTarget(null); setHighlights([]);
     setLayers(initialLayers); setView("drawing");
   };
 
@@ -163,6 +168,10 @@ export default function DemoApp() {
         <span style={{ fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 3, background: "#f3f4f6" }}>DXF</span>
         <button onClick={() => { setCriterion(null); setView("checklist"); }} style={{ marginLeft: "auto", border: "none", background: "none", fontSize: 11, color: "#6b7280", textDecoration: "underline", cursor: "pointer" }}>照合: {manifest.checklistName}（#2〜#14）</button>
       </div>
+      {view === "drawing" && selectedResult && <div role="status" aria-label="表示中のチェック項目" className="no-print"
+        style={{ padding: "7px 16px", background: "#fff", borderBottom: "1px solid #e5e7eb", color: "#374151", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+        #{selectedResult.check_id} {selectedResult.check_name} の結果を表示中
+      </div>}
       <div id="demo-panel" role="tabpanel" aria-labelledby={`tab-${view}`} style={{ flex: 1, overflow: "hidden", display: "flex" }}>
         {view === "list" && <section aria-label="チェック結果一覧" style={{ flex: 1, overflow: "auto" }}>
           <ListView floorData={listFloorData(floor)} results={floor.results} checkDefs={manifest.checks}
@@ -207,14 +216,14 @@ export default function DemoApp() {
                 onPdfFilesSelected={noop} onPdfClear={noop} onPdfOpacityChange={noop} simplified />
               </Suspense> : <p style={{ padding: 20, fontSize: 13, color: "#9ca3af" }}>図面を読み込み中…</p>}
           </section>
-          <aside className="drawing-sidebar no-print" aria-label="図面の詳細" style={{ width: 300, borderLeft: "1px solid #e5e7eb", background: "#fff", overflow: "auto", flexShrink: 0 }}>
+          <aside ref={sidebarRef} className="drawing-sidebar no-print" aria-label="図面の詳細" style={{ width: 300, borderLeft: "1px solid #e5e7eb", background: "#fff", overflow: "auto", flexShrink: 0 }}>
+            {selectedResult && <FocusedCheckResult result={selectedResult}
+              rule={manifest.checks.find((def) => def.id === selectedResult.check_id)?.description}
+              additionalResults={selected ? floor.results.filter((r) => r !== selectedResult && r.sleeve_id === selected.id && r.check_id === selectedResult.check_id) : []}
+              onOpenCriterion={openCriterion} />}
             {selected || selectedResult ? <button onClick={() => { setSelected(null); setSelectedResult(null); }} style={{ margin: "10px 16px 0", border: "none", background: "none", color: "#6b7280", cursor: "pointer", fontSize: 11 }}>← 図面の要約</button> : null}
-            {selected ? <SleeveInfo sleeve={selected} results={floor.results} slabLabels={drawing?.slab_labels} onOpenCriterion={openCriterion} />
-              : selectedResult ? <div style={{ padding: 16, fontSize: 12, lineHeight: 1.6 }}>
-                <div style={{ fontWeight: 600, marginBottom: 8 }}>#{selectedResult.check_id} {selectedResult.check_name}</div><p>{selectedResult.message}</p>
-                <CriterionLink checkId={selectedResult.check_id} rule={selectedResult.rule} onOpen={openCriterion} />
-                {selectedResult.fix_hint && <p>直し方: {selectedResult.fix_hint}</p>}
-              </div>
+            {selected ? <SleeveInfo sleeve={selected} results={floor.results} slabLabels={drawing?.slab_labels} onOpenCriterion={openCriterion} focusedCheckId={selectedResult?.check_id} />
+              : selectedResult ? null
               : <div style={{ padding: 20, color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>
                 <div style={{ fontWeight: 600, color: "#111827", marginBottom: 12 }}>図面の要約</div>
                 <dl className="drawing-stats" style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, marginBottom: 16 }}>

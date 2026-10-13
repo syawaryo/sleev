@@ -10,7 +10,7 @@ interface Props {
   openChecks: Set<number>;
   onOpenChecksChange: (v: Set<number>) => void;
   onNavigate?: (coords: [number, number], sleeveId?: string, relatedCoords?: [number, number][], result?: CheckResult) => void;
-  onOpenDrawing?: () => void;
+  onOpenDrawing?: (result?: CheckResult) => void;
   onOpenCriterion?: (id: number) => void;
 }
 
@@ -60,7 +60,7 @@ export default function ListView({ floorData, results, checkDefs, filter, onFilt
   const showDrawing = (rows: CheckResult[]) => {
     const r = rows.find((row) => getCoords(row));
     if (r) onNavigate?.(getCoords(r)!, r.sleeve_id ?? undefined, r.related_coords, r);
-    else if (onOpenDrawing) onOpenDrawing();
+    else if (onOpenDrawing) onOpenDrawing(rows[0]);
     else if (floorData.sleeves[0]) onNavigate?.(floorData.sleeves[0].center, floorData.sleeves[0].id);
   };
 

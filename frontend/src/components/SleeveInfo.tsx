@@ -6,6 +6,7 @@ interface Props {
   results: CheckResult[];
   slabLabels?: SlabLabel[];
   onOpenCriterion?: (id: number) => void;
+  focusedCheckId?: number;
 }
 
 // Parse sleeve FL annotation like "FL+40", "FL-360", "FL±0" into an integer mm.
@@ -113,8 +114,8 @@ function renderResultCard(r: CheckResult, prefix: string, i: number, onOpenCrite
   );
 }
 
-export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCriterion }: Props) {
-  const sleeveResults = results.filter((r) => r.sleeve_id === sleeve.id);
+export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCriterion, focusedCheckId }: Props) {
+  const sleeveResults = results.filter((r) => r.sleeve_id === sleeve.id && r.check_id !== focusedCheckId);
   const ngResults = sleeveResults.filter((r) => r.severity === "NG");
   const warnResults = sleeveResults.filter((r) => r.severity === "WARNING");
   const okCount = sleeveResults.filter((r) => r.severity === "OK").length;
@@ -162,7 +163,7 @@ export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCri
       {/* Header */}
       <div style={{ padding: "14px 16px", borderBottom: "1px solid #f3f4f6" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ background: badge.bg, color: badge.color, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>{worst}</span>
+          {focusedCheckId === undefined && <span style={{ background: badge.bg, color: badge.color, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>{worst}</span>}
           <span style={{ fontWeight: 700, color: "#111827", fontSize: 15 }}>{sleeve.pn_number || sleeve.id}</span>
         </div>
         <div style={{ color: "#9ca3af", fontSize: 11, marginTop: 4 }}>{sleeve.layer}</div>
@@ -182,10 +183,17 @@ export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCri
       </div>
 
       {/* Check results */}
-      <div style={{ padding: "12px 16px" }}>
-        <div style={{ color: "#6b7280", fontSize: 10, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
-          チェック結果
-        </div>
+      <section aria-label={focusedCheckId === undefined ? "このスリーブのチェック結果" : "このスリーブの、ほかの項目の結果"} style={{ padding: "12px 16px" }}>
+        {focusedCheckId === undefined
+          ? <div style={{ color: "#6b7280", fontSize: 10, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>チェック結果</div>
+          : <div style={{ marginBottom: 10 }}>
+            <h3 style={{ color: "#374151", fontSize: 12, lineHeight: 1.6, fontWeight: 600 }}>このスリーブの、ほかの項目の結果</h3>
+            <p style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 11 }}>
+              <span style={{ color: ngResults.length ? "#dc2626" : "#6b7280" }}>NG {ngResults.length}件</span>
+              <span style={{ color: warnResults.length ? "#d97706" : "#6b7280" }}>WARN {warnResults.length}件</span>
+              <span style={{ color: "#6b7280" }}>OK {okCount}件</span>
+            </p>
+          </div>}
 
         {ngResults.map((r, i) => renderResultCard(r, "ng", i, onOpenCriterion))}
         {warnResults.map((r, i) => renderResultCard(r, "w", i, onOpenCriterion))}
@@ -195,7 +203,7 @@ export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCri
             + {okCount} 件 OK
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

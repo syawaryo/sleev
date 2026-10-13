@@ -49,7 +49,8 @@ def main():
 
         # A real NG takes us to its sleeve and the correct checklist item.
         page.get_by_role("button", name="#9の図面を見る", exact=True).click()
-        expect(page.locator(".drawing-sidebar").get_by_text("チェック結果", exact=True)).to_be_visible()
+        expect(page.get_by_role("region", name="選択したチェック結果", exact=True).get_by_role("heading", name="#9 位置特定寸法：NG", exact=True)).to_be_visible()
+        expect(page.get_by_role("status", name="表示中のチェック項目")).to_have_text("#9 位置特定寸法 の結果を表示中")
         expect(page.locator(".drawing-panel svg")).to_be_visible()
         page.screenshot(path=str(OUT / "02-drawing-ng.png"))
         selected_viewbox = page.locator(".drawing-panel svg").get_attribute("viewBox")
@@ -70,6 +71,8 @@ def main():
         # Overview, actual touch pan + pinch, and explicit zoom controls.
         page.get_by_role("button", name="← 図面の要約", exact=True).click()
         expect(page.get_by_text("図面の要約", exact=True)).to_be_visible()
+        expect(page.get_by_role("region", name="選択したチェック結果", exact=True)).to_have_count(0)
+        expect(page.get_by_role("status", name="表示中のチェック項目")).to_have_count(0)
         svg = page.locator(".drawing-panel svg").first
         box = svg.bounding_box()
         x, y = box["x"] + box["width"] * 0.3, box["y"] + box["height"] * 0.5
@@ -91,10 +94,52 @@ def main():
         page.get_by_role("tab", name="チェック結果", exact=True).click()
         page.get_by_role("button", name="OK", exact=True).click()
         group = page.locator('[data-check-id="5"]')
+        group.get_by_role("button", name="#5の図面を見る", exact=True).click()
+        focus = page.get_by_role("region", name="選択したチェック結果", exact=True)
+        others = page.get_by_role("region", name="このスリーブの、ほかの項目の結果", exact=True)
+        first_ok = next(r for r in snapshot["floors"][0]["results"] if r["check_id"] == 5)
+        expected_others = [r for r in snapshot["floors"][0]["results"] if r["sleeve_id"] == first_ok["sleeve_id"] and r["check_id"] != 5]
+        expect(focus.get_by_role("heading", name="#5 勾配記載：OK", exact=True)).to_be_visible()
+        expect(focus.get_by_text(first_ok["message"], exact=True)).to_be_visible()
+        expect(focus.get_by_text(next(d["description"] for d in snapshot["checks"] if d["id"] == 5), exact=True)).to_be_visible()
+        expect(others.get_by_role("heading", name="このスリーブの、ほかの項目の結果", exact=True)).to_be_visible()
+        expect(others.get_by_text(f'NG {sum(r["severity"] == "NG" for r in expected_others)}件', exact=True)).to_be_visible()
+        expect(others.get_by_role("button", name="チェック観点 #5を見る", exact=True)).to_have_count(0)
+        expect(page.get_by_role("status", name="表示中のチェック項目")).to_have_text("#5 勾配記載 の結果を表示中")
+        assert abs(focus.bounding_box()["y"] - page.locator(".drawing-sidebar").bounding_box()["y"]) < 2
+        page.screenshot(path=str(OUT / "12-focused-ok.png"))
+        page.locator(".drawing-sidebar").evaluate("el => el.scrollTop = el.scrollHeight")
+        page.get_by_role("tab", name="チェック結果", exact=True).click()
         group.get_by_role("button", name="#5 勾配記載", exact=True).click()
         expect(group.locator("tr").first).to_be_visible()
         group.locator("tr").first.click()
         expect(svg).to_be_visible()
+        expect(focus.get_by_role("heading", name="#5 勾配記載：OK", exact=True)).to_be_visible()
+        assert page.locator(".drawing-sidebar").evaluate("el => el.scrollTop") == 0
+
+        # Floor-wide checks without a sleeve or coordinates retain their context.
+        page.get_by_role("tab", name="チェック結果", exact=True).click()
+        page.get_by_role("button", name="#13の図面を見る", exact=True).click()
+        expect(focus.get_by_role("heading", name="#13 寸法表記統一：OK", exact=True)).to_be_visible()
+        expect(page.get_by_role("status", name="表示中のチェック項目")).to_have_text("#13 寸法表記統一 の結果を表示中")
+        expect(others).to_have_count(0)
+
+        # A specific WARNING must not inherit an unrelated sleeve's NG.
+        page.get_by_role("tab", name="チェック結果", exact=True).click()
+        page.get_by_role("button", name="全て", exact=True).click()
+        dimension_group = page.locator('[data-check-id="4"]')
+        dimension_group.get_by_role("button", name="#4 寸法合計", exact=True).click()
+        warning = next(r for r in snapshot["floors"][0]["results"] if r["severity"] == "WARNING")
+        dimension_group.get_by_text(warning["message"], exact=True).click()
+        expect(focus.get_by_role("heading", name="#4 寸法合計：WARNING", exact=True)).to_be_visible()
+        expect(focus.get_by_text(warning["message"], exact=True)).to_be_visible()
+        expect(others).to_have_count(0)
+
+        # A floor change clears the originating check rather than leaving a stale label.
+        page.get_by_role("button", name=re.compile(r"^2階床スリーブ図[.]dxf")).click()
+        expect(focus).to_have_count(0)
+        expect(page.get_by_role("status", name="表示中のチェック項目")).to_have_count(0)
+        page.get_by_role("button", name=re.compile(r"^1階床スリーブ図[.]dxf")).click()
 
         # All source entities are counted, including the unclassified group.
         page.get_by_role("tab", name="図面データ", exact=True).click()
@@ -170,7 +215,7 @@ def main():
         page.get_by_role("button", name="再読み込み", exact=True).click()
         expect(page.get_by_text(f'{entity_counts["2f"]:,} 件', exact=True)).to_be_visible()
         browser.close()
-    print("PASS: four tabs, whole-card criterion navigation, drawing position preserved, full entity counts/search, keyboard tabs, offline floor/data switching, NG/OK navigation, touch pan/pinch, zero targets, drawing/data retry, no API calls or browser errors")
+    print("PASS: four tabs, whole-card criterion navigation, drawing position preserved, full entity counts/search, keyboard tabs, offline floor/data switching, selected check status/reason and separate other results, NG/OK/WARNING and coordinate-free navigation, context/scroll reset, touch pan/pinch, zero targets, drawing/data retry, no API calls or browser errors")
 
 
 if __name__ == "__main__":
