@@ -163,6 +163,11 @@ export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCri
     未判定: { bg: "#f3f4f6", color: "#6b7280" },
   };
   const badge = badgeStyle[worst];
+  const resultCards = <>
+    {ngResults.map((r, i) => renderResultCard(r, "ng", i, onOpenCriterion, checkDefs.find((d) => d.id === r.check_id)?.description))}
+    {warnResults.map((r, i) => renderResultCard(r, "w", i, onOpenCriterion, checkDefs.find((d) => d.id === r.check_id)?.description))}
+    {okResults.map((r, i) => renderResultCard(r, "ok", i, onOpenCriterion, checkDefs.find((d) => d.id === r.check_id)?.description))}
+  </>;
 
   return (
     <div style={{ fontSize: 13 }}>
@@ -191,19 +196,23 @@ export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCri
       {/* Check results */}
       <section aria-label={focusedCheckId === undefined ? "このスリーブのチェック結果" : "このスリーブの、ほかの項目の結果"} style={{ padding: "12px 16px" }}>
         {focusedCheckId === undefined
-          ? <div style={{ color: "#6b7280", fontSize: 10, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>チェック結果</div>
-          : <div style={{ marginBottom: 10 }}>
-            <h3 style={{ color: "#374151", fontSize: 12, lineHeight: 1.6, fontWeight: 600 }}>このスリーブの、ほかの項目の結果</h3>
-            <p style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 11 }}>
-              <span style={{ color: ngResults.length ? "#dc2626" : "#6b7280" }}>NG {ngResults.length}件</span>
-              <span style={{ color: warnResults.length ? "#d97706" : "#6b7280" }}>WARN {warnResults.length}件</span>
-              <span style={{ color: okCount ? "#15803d" : "#6b7280" }}>OK {okCount}件</span>
-            </p>
-          </div>}
-
-        {ngResults.map((r, i) => renderResultCard(r, "ng", i, onOpenCriterion, checkDefs.find((d) => d.id === r.check_id)?.description))}
-        {warnResults.map((r, i) => renderResultCard(r, "w", i, onOpenCriterion, checkDefs.find((d) => d.id === r.check_id)?.description))}
-        {okResults.map((r, i) => renderResultCard(r, "ok", i, onOpenCriterion, checkDefs.find((d) => d.id === r.check_id)?.description))}
+          ? <>
+            <div style={{ color: "#6b7280", fontSize: 10, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>チェック結果</div>
+            {resultCards}
+          </>
+          : <details key={`${sleeve.id}:${focusedCheckId}`}>
+            <summary style={{ cursor: "pointer", color: "#374151", fontSize: 12 }}>
+              <h3 style={{ display: "inline", fontSize: 12, lineHeight: 1.6, fontWeight: 600 }}>
+                このスリーブの、ほかの項目の結果
+                <span style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 11, fontWeight: 400 }}>
+                  <span style={{ color: ngResults.length ? "#dc2626" : "#6b7280" }}>NG {ngResults.length}件</span>
+                  <span style={{ color: warnResults.length ? "#d97706" : "#6b7280" }}>WARN {warnResults.length}件</span>
+                  <span style={{ color: okCount ? "#15803d" : "#6b7280" }}>OK {okCount}件</span>
+                </span>
+              </h3>
+            </summary>
+            <div style={{ marginTop: 10 }}>{resultCards}</div>
+          </details>}
       </section>
     </div>
   );
