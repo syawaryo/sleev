@@ -168,10 +168,6 @@ export default function DemoApp() {
         <span style={{ fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 3, background: "#f3f4f6" }}>DXF</span>
         <button onClick={() => { setCriterion(null); setView("checklist"); }} style={{ marginLeft: "auto", border: "none", background: "none", fontSize: 11, color: "#6b7280", textDecoration: "underline", cursor: "pointer" }}>照合: {manifest.checklistName}（#2〜#14）</button>
       </div>
-      {view === "drawing" && selectedResult && <div role="status" aria-label="表示中のチェック項目" className="no-print"
-        style={{ padding: "7px 16px", background: "#fff", borderBottom: "1px solid #e5e7eb", color: "#374151", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
-        #{selectedResult.check_id} {selectedResult.check_name} の結果を表示中
-      </div>}
       <div id="demo-panel" role="tabpanel" aria-labelledby={`tab-${view}`} style={{ flex: 1, overflow: "hidden", display: "flex" }}>
         {view === "list" && <section aria-label="チェック結果一覧" style={{ flex: 1, overflow: "auto" }}>
           <ListView floorData={listFloorData(floor)} results={floor.results} checkDefs={manifest.checks}
@@ -222,7 +218,7 @@ export default function DemoApp() {
               additionalResults={selected ? floor.results.filter((r) => r !== selectedResult && r.sleeve_id === selected.id && r.check_id === selectedResult.check_id) : []}
               onOpenCriterion={openCriterion} />}
             {selected || selectedResult ? <button onClick={() => { setSelected(null); setSelectedResult(null); }} style={{ margin: "10px 16px 0", border: "none", background: "none", color: "#6b7280", cursor: "pointer", fontSize: 11 }}>← 図面の要約</button> : null}
-            {selected ? <SleeveInfo sleeve={selected} results={floor.results} slabLabels={drawing?.slab_labels} onOpenCriterion={openCriterion} focusedCheckId={selectedResult?.check_id} />
+            {selected ? <SleeveInfo sleeve={selected} results={floor.results} slabLabels={drawing?.slab_labels} onOpenCriterion={openCriterion} focusedCheckId={selectedResult?.check_id} checkDefs={manifest.checks} />
               : selectedResult ? null
               : <div style={{ padding: 20, color: "#6b7280", fontSize: 13, lineHeight: 1.7 }}>
                 <div style={{ fontWeight: 600, color: "#111827", marginBottom: 12 }}>図面の要約</div>

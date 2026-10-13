@@ -1,4 +1,4 @@
-import type { Sleeve, CheckResult, SlabLabel } from "../types";
+import type { Sleeve, CheckResult, CheckDef, SlabLabel } from "../types";
 import CriterionLink from "./CriterionLink";
 
 interface Props {
@@ -7,6 +7,7 @@ interface Props {
   slabLabels?: SlabLabel[];
   onOpenCriterion?: (id: number) => void;
   focusedCheckId?: number;
+  checkDefs?: CheckDef[];
 }
 
 // Parse sleeve FL annotation like "FL+40", "FL-360", "FL±0" into an integer mm.
@@ -78,11 +79,13 @@ function computeSlabTopText(sleeve: Sleeve, slabLabels: SlabLabel[]): string | n
   return `SL${a >= 0 ? "+" : ""}${a}～${b >= 0 ? "+" : ""}${b}`;
 }
 
-function renderResultCard(r: CheckResult, prefix: string, i: number, onOpenCriterion?: (id: number) => void) {
+function renderResultCard(r: CheckResult, prefix: string, i: number, onOpenCriterion?: (id: number) => void, fallbackRule?: string) {
   const isNg = r.severity === "NG";
   const palette = isNg
     ? { bg: "#fef2f2", border: "#ef4444", id: "#dc2626", title: "#991b1b" }
-    : { bg: "#fffbeb", border: "#fbbf24", id: "#d97706", title: "#92400e" };
+    : r.severity === "OK"
+      ? { bg: "#f0fdf4", border: "#22c55e", id: "#15803d", title: "#166534" }
+      : { bg: "#fffbeb", border: "#fbbf24", id: "#d97706", title: "#92400e" };
   const hasStructured = !!(r.target || r.rule || r.expected || r.found || r.fix_hint);
 
   const Row = ({ label, value, accent }: { label: string; value: string; accent?: boolean }) => (
@@ -93,11 +96,13 @@ function renderResultCard(r: CheckResult, prefix: string, i: number, onOpenCrite
   );
 
   return (
-    <div key={`${prefix}${i}`} style={{ background: palette.bg, borderLeft: `3px solid ${palette.border}`, padding: "8px 10px", borderRadius: "0 6px 6px 0", marginBottom: 6 }}>
+    <article key={`${prefix}${i}`} aria-label={`#${r.check_id} ${r.check_name}：${r.severity}`} style={{ background: palette.bg, borderLeft: `3px solid ${palette.border}`, padding: "8px 10px", borderRadius: "0 6px 6px 0", marginBottom: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: hasStructured ? 6 : 3 }}>
         <span style={{ color: palette.id, fontWeight: 700, fontSize: 11 }}>#{r.check_id}</span>
         <span style={{ color: palette.title, fontSize: 12, fontWeight: 600 }}>{r.check_name}</span>
+        <span style={{ marginLeft: "auto", color: palette.id, fontWeight: 700, fontSize: 11 }}>{r.severity === "WARNING" ? "WARN" : r.severity}</span>
       </div>
+      {r.severity === "OK" && hasStructured && <p style={{ color: "#374151", fontSize: 12, lineHeight: 1.6, marginBottom: 6 }}>{r.message}</p>}
       {hasStructured ? (
         <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", rowGap: 3, columnGap: 8 }}>
           {r.target && <Row label="対象" value={r.target} />}
@@ -107,18 +112,19 @@ function renderResultCard(r: CheckResult, prefix: string, i: number, onOpenCrite
           {r.fix_hint && <Row label="対応" value={r.fix_hint} />}
         </div>
       ) : (
-        <div style={{ color: "#6b7280", fontSize: 11 }}>{r.message}</div>
+        <div style={{ color: "#374151", fontSize: 12, lineHeight: 1.6 }}>{r.message}</div>
       )}
-      {!r.rule && onOpenCriterion && <CriterionLink checkId={r.check_id} onOpen={onOpenCriterion} />}
-    </div>
+      {!r.rule && onOpenCriterion && <CriterionLink checkId={r.check_id} rule={fallbackRule} onOpen={onOpenCriterion} />}
+    </article>
   );
 }
 
-export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCriterion, focusedCheckId }: Props) {
+export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCriterion, focusedCheckId, checkDefs = [] }: Props) {
   const sleeveResults = results.filter((r) => r.sleeve_id === sleeve.id && r.check_id !== focusedCheckId);
   const ngResults = sleeveResults.filter((r) => r.severity === "NG");
   const warnResults = sleeveResults.filter((r) => r.severity === "WARNING");
-  const okCount = sleeveResults.filter((r) => r.severity === "OK").length;
+  const okResults = sleeveResults.filter((r) => r.severity === "OK");
+  const okCount = okResults.length;
 
   // Extract only the leading alphanumeric discipline code from label_text (e.g. "G(低) 225φ" → "G")
   const disciplineCode = sleeve.label_text?.match(/^[A-Za-z0-9]+/)?.[0] || null;
@@ -191,18 +197,13 @@ export default function SleeveInfo({ sleeve, results, slabLabels = [], onOpenCri
             <p style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 11 }}>
               <span style={{ color: ngResults.length ? "#dc2626" : "#6b7280" }}>NG {ngResults.length}件</span>
               <span style={{ color: warnResults.length ? "#d97706" : "#6b7280" }}>WARN {warnResults.length}件</span>
-              <span style={{ color: "#6b7280" }}>OK {okCount}件</span>
+              <span style={{ color: okCount ? "#15803d" : "#6b7280" }}>OK {okCount}件</span>
             </p>
           </div>}
 
-        {ngResults.map((r, i) => renderResultCard(r, "ng", i, onOpenCriterion))}
-        {warnResults.map((r, i) => renderResultCard(r, "w", i, onOpenCriterion))}
-
-        {okCount > 0 && (
-          <div style={{ color: "#9ca3af", fontSize: 11, marginTop: 8 }}>
-            + {okCount} 件 OK
-          </div>
-        )}
+        {ngResults.map((r, i) => renderResultCard(r, "ng", i, onOpenCriterion, checkDefs.find((d) => d.id === r.check_id)?.description))}
+        {warnResults.map((r, i) => renderResultCard(r, "w", i, onOpenCriterion, checkDefs.find((d) => d.id === r.check_id)?.description))}
+        {okResults.map((r, i) => renderResultCard(r, "ok", i, onOpenCriterion, checkDefs.find((d) => d.id === r.check_id)?.description))}
       </section>
     </div>
   );

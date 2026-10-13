@@ -16,7 +16,12 @@ export default function FocusedCheckResult({ result, rule, additionalResults, on
       : { background: "#fffbeb", border: "#fde68a", color: "#b45309" };
   const details = [["対象", result.target], ["期待", result.expected], ["検出", result.found], ["対応", result.fix_hint]];
 
-  return <section aria-label="選択したチェック結果" style={{ padding: "14px 16px", background: palette.background, borderBottom: `1px solid ${palette.border}` }}>
+  return <section aria-label="選択したチェック結果" style={{ background: palette.background, borderBottom: `1px solid ${palette.border}` }}>
+    <div role="status" aria-label="表示中のチェック項目"
+      style={{ padding: "8px 16px", background: "#f8fafc", borderBottom: "1px solid #e5e7eb", color: "#374151", fontSize: 12, fontWeight: 600 }}>
+      #{result.check_id} {result.check_name} の結果を表示中
+    </div>
+    <div style={{ padding: "14px 16px" }}>
     <h2 style={{ fontSize: 15, lineHeight: 1.5, color: palette.color, marginBottom: 10 }}>
       #{result.check_id} {result.check_name}：{result.severity}
     </h2>
@@ -32,5 +37,6 @@ export default function FocusedCheckResult({ result, rule, additionalResults, on
       <div style={{ fontWeight: 600, marginBottom: 4 }}>同じ項目のほかの判定</div>
       {additionalResults.map((r, i) => <p key={i} style={{ marginTop: 4 }}>{r.severity}：{r.message}</p>)}
     </div>}
+    </div>
   </section>;
 }
